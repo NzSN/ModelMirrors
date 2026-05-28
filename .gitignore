@@ -1,2 +1,3 @@
 dist-newstyle/*
 _apalache-out/*
+/.agent-shell/
