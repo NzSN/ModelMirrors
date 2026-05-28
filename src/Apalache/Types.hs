@@ -1,0 +1,105 @@
+module Apalache.Types where
+
+import Data.Aeson (FromJSON, ToJSON, withObject, (.:), (.=), object)
+import qualified Data.Aeson as A
+import Data.Aeson.Key (fromString, fromText, toText)
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.Foldable as F
+import qualified Data.Map.Strict as Map
+import Data.Map.Strict (Map)
+import Data.Text (Text)
+import qualified Data.Text as T
+
+data ApalacheConfig = ApalacheConfig
+  { specPath      :: !FilePath
+  , initPredicate :: !(Maybe Text)
+  , nextPredicate :: !(Maybe Text)
+  , constInit     :: !(Maybe Text)
+  } deriving (Show, Eq)
+
+data ValidateResult
+  = SpecValid
+  | SpecInvalid !Text
+  deriving (Show, Eq)
+
+data TraceGenerationConfig = TraceGenerationConfig
+  { invariant   :: !Text
+  , lengthBound :: !Int
+  , numTraces   :: !Int
+  } deriving (Show, Eq)
+
+data TraceGenerationResult
+  = TracesGenerated ![ItfTrace]
+  | GenerationError !Text
+  deriving (Show, Eq)
+
+newtype ApalacheError = ApalacheError { unApalacheError :: Text }
+  deriving (Show, Eq)
+
+data ItfTrace = ItfTrace
+  { traceVars   :: ![Text]
+  , traceStates :: ![Map Text Value]
+  } deriving (Show, Eq)
+
+data Value
+  = VInt    !Integer
+  | VBool   !Bool
+  | VStr    !Text
+  | VSet    ![Value]
+  | VTuple  ![Value]
+  | VRecord !(Map Text Value)
+  | VNull
+  deriving (Show, Eq)
+
+instance FromJSON ItfTrace where
+  parseJSON = withObject "ItfTrace" $ \o ->
+    ItfTrace
+      <$> o .: fromString "vars"
+      <*> o .: fromString "states"
+
+instance ToJSON ItfTrace where
+  toJSON t = object
+    [ fromString "vars" .= traceVars t
+    , fromString "states" .= traceStates t
+    ]
+
+instance FromJSON Value where
+  parseJSON (A.Object o)
+    | Just (A.String n) <- KM.lookup (fromString "#bigint") o
+    = case T.unpack n of
+        ""  -> pure VNull
+        '-' : ds | all (`elem` ['0' .. '9']) ds -> pure $ VInt (read ('-' : ds))
+        ds   | all (`elem` ['0' .. '9']) ds -> pure $ VInt (read ds)
+        _    -> fail $ "Invalid bigint: " ++ T.unpack n
+
+    | Just (A.Array arr) <- KM.lookup (fromString "#tup") o
+    = VTuple <$> mapM A.parseJSON (F.toList arr)
+
+    | otherwise = do
+        pairs <- mapM (\(k, v) -> (toText k,) <$> A.parseJSON v) (KM.toList o)
+        pure $ VRecord (Map.fromList pairs)
+
+  parseJSON (A.Array arr) =
+    VSet <$> mapM A.parseJSON (F.toList arr)
+
+  parseJSON (A.Bool b) =
+    pure $ VBool b
+
+  parseJSON (A.String s) =
+    pure $ VStr s
+
+  parseJSON n@(A.Number _) =
+    VInt <$> A.parseJSON n
+
+  parseJSON A.Null =
+    pure VNull
+
+instance ToJSON Value where
+  toJSON (VInt i) =
+    object [fromString "#bigint" .= T.pack (show i)]
+  toJSON (VBool b)   = A.Bool b
+  toJSON (VStr s)    = A.String s
+  toJSON (VSet vs)   = A.toJSON (map A.toJSON vs)
+  toJSON (VTuple vs) = object [fromString "#tup" .= A.toJSON (map A.toJSON vs)]
+  toJSON (VRecord m) = object [(fromText k, A.toJSON v) | (k, v) <- Map.toList m]
+  toJSON VNull       = A.Null
