@@ -22,11 +22,34 @@ data ValidateResult
   | SpecInvalid !Text
   deriving (Show, Eq)
 
+instance ToJSON ValidateResult where
+  toJSON SpecValid = A.String (T.pack "valid")
+  toJSON (SpecInvalid e) = object [fromString "invalid" .= e]
+
+instance FromJSON ValidateResult where
+  parseJSON v = case v of
+    A.String t | t == T.pack "valid" -> pure SpecValid
+    _ -> withObject "ValidateResult" (\o -> SpecInvalid <$> o .: fromString "invalid") v
+
 data TraceGenerationConfig = TraceGenerationConfig
   { invariant   :: !Text
   , lengthBound :: !Int
   , numTraces   :: !Int
   } deriving (Show, Eq)
+
+instance ToJSON TraceGenerationConfig where
+  toJSON c = object
+    [ fromString "invariant" .= invariant c
+    , fromString "lengthBound" .= lengthBound c
+    , fromString "numTraces" .= numTraces c
+    ]
+
+instance FromJSON TraceGenerationConfig where
+  parseJSON = withObject "TraceGenerationConfig" $ \o ->
+    TraceGenerationConfig
+      <$> o .: fromString "invariant"
+      <*> o .: fromString "lengthBound"
+      <*> o .: fromString "numTraces"
 
 data TraceGenerationResult
   = TracesGenerated ![ItfTrace]
