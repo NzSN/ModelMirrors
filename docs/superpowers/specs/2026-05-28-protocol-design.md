@@ -45,13 +45,13 @@ All other transitions are protocol violations.
 
 ## Modules
 
-### `Protocol` (`src/Protocol.hs`)
+### `Protocol.Core` (`src/Protocol/Core.hs`)
 
 - Pure message types and state machine
 - Uses existing types from `Apalache.Types` (`ValidateResult`, `TraceGenerationConfig`, `Value`)
 - No serialization instances, no IO, no process handling
 
-### `Protocol.Json` (`src/Protocol/Json.hs`)
+### `Protocol.Format.Json` (`src/Protocol/Format/Json.hs`)
 
 - JSON codec via `aeson` (`ToJSON`/`FromJSON` instances) for all protocol messages
 - `Value` and `ItfTrace` already have JSON instances; minimal new code needed
@@ -70,5 +70,14 @@ All other transitions are protocol violations.
 {"tag": "all_steps_done"}
 {"tag": "protocol_error",     "error": "..."}
 ```
+
+## Transport
+
+Communication over **stdin/stdout with newline-delimited JSON (NDJSON)** — the same model as LSP
+and other language servers.
+
+- The Haskell mirror binary is spawned as a subprocess by the client (any language).
+- Each JSON message is written as a single line to stdout (mirror → client) or stdin (client → mirror).
+- No port negotiation, no socket setup, no extra dependencies.
 
 Both modules added to `exposed-modules` in `ModelMirros.cabal`.

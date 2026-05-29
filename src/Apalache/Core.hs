@@ -1,4 +1,4 @@
-module Apalache
+module Apalache.Core
   ( module Apalache.Types
   , module Apalache.Command
   , module Apalache.Trace

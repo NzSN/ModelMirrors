@@ -1,10 +1,10 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Protocol.Json
-  ( module Protocol
+module Protocol.Format.Json
+  ( module Protocol.Core
   ) where
 
-import Protocol
+import Protocol.Core
 
 import Data.Aeson
 import Data.Aeson.Key (fromString)
