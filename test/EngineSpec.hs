@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -Wno-orphans #-}
 module EngineSpec (spec) where
 
 import Apalache.Types (ItfTrace (..), Value (..))
@@ -6,14 +5,12 @@ import Engine.Core (traceSteps, diffState)
 import Engine.Handle (EngineM (..))
 import Engine.Types (Step (..), StateDiff (..), VarDiff (..))
 
-import Data.Functor.Identity (runIdentity, Identity)
+import Data.Functor.Identity (runIdentity)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Exit (exitFailure)
-
-instance EngineM Identity
 
 spec :: IO ()
 spec = do

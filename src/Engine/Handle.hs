@@ -1,6 +1,7 @@
 module Engine.Handle (EngineM (..)) where
 
 import Apalache.Types (ItfTrace (..), Value)
+import Data.Functor.Identity (Identity)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Engine.Core (diffState, traceSteps)
@@ -17,3 +18,5 @@ class Monad m => EngineM m where
         case diff of
           StatesMatch -> (diff :) <$> go steps
           StateMismatch{} -> pure [diff]
+
+instance EngineM Identity
