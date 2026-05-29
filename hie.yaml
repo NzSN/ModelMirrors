@@ -1,0 +1,10 @@
+cradle:
+  cabal:
+    - path: "src"
+      component: "lib:ModelMirros"
+
+    - path: "app/Main.hs"
+      component: "ModelMirros:exe:ModelMirros"
+
+    - path: "test"
+      component: "ModelMirros:test:ModelMirros-test"
