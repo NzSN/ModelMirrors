@@ -1,14 +1,19 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
 module EngineSpec (spec) where
 
 import Apalache.Types (ItfTrace (..), Value (..))
 import Engine.Core (traceSteps, diffState)
+import Engine.Handle (EngineM (..))
 import Engine.Types (Step (..), StateDiff (..), VarDiff (..))
 
+import Data.Functor.Identity (runIdentity, Identity)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Exit (exitFailure)
+
+instance EngineM Identity
 
 spec :: IO ()
 spec = do
@@ -22,6 +27,10 @@ spec = do
   testDiffMissingVar
   testDiffExtraVar
   testDiffMixed
+  testReplayEmpty
+  testReplayAllMatch
+  testReplayFirstMismatch
+  testReplaySecondMismatch
 
 ----------------------------------------------------------------------
 -- traceSteps tests
@@ -156,4 +165,63 @@ testDiffMixed = do
           exitFailure
     _ -> do
       putStrLn $ "FAIL: expected StateMismatch, got " ++ show result
+      exitFailure
+
+----------------------------------------------------------------------
+-- replayTrace tests
+
+testReplayEmpty :: IO ()
+testReplayEmpty = do
+  putStrLn "[10] replayTrace empty trace ..."
+  let trace = ItfTrace [] []
+  let report = \_ -> pure (Map.empty :: Map Text Value)
+  let result = runIdentity (replayTrace trace report)
+  if null result
+    then putStrLn "  PASS: empty trace yields empty list"
+    else do
+      putStrLn "FAIL: expected empty list"
+      exitFailure
+
+testReplayAllMatch :: IO ()
+testReplayAllMatch = do
+  putStrLn "[11] replayTrace all match ..."
+  let s0 = Map.singleton (T.pack "x") (VInt 1)
+  let s1 = Map.singleton (T.pack "x") (VInt 2)
+  let trace = ItfTrace [T.pack "x"] [s0, s1]
+  let report step = pure (stepVars step)
+  let results = runIdentity (replayTrace trace report)
+  case results of
+    [StatesMatch, StatesMatch] -> putStrLn "  PASS: both steps match"
+    _ -> do
+      putStrLn $ "FAIL: expected [StatesMatch, StatesMatch], got " ++ show results
+      exitFailure
+
+testReplayFirstMismatch :: IO ()
+testReplayFirstMismatch = do
+  putStrLn "[12] replayTrace first mismatch ..."
+  let s0 = Map.singleton (T.pack "x") (VInt 1)
+  let s1 = Map.singleton (T.pack "x") (VInt 2)
+  let trace = ItfTrace [T.pack "x"] [s0, s1]
+  let report _step = pure (Map.singleton (T.pack "x") (VInt 999))
+  let results = runIdentity (replayTrace trace report)
+  case results of
+    [StateMismatch{}] -> putStrLn "  PASS: stops on first mismatch"
+    _ -> do
+      putStrLn $ "FAIL: expected [StateMismatch], got " ++ show results
+      exitFailure
+
+testReplaySecondMismatch :: IO ()
+testReplaySecondMismatch = do
+  putStrLn "[13] replayTrace second mismatch ..."
+  let s0 = Map.singleton (T.pack "x") (VInt 1)
+  let s1 = Map.singleton (T.pack "x") (VInt 2)
+  let trace = ItfTrace [T.pack "x"] [s0, s1]
+  let report step = case stepIdx step of
+        0 -> pure (Map.singleton (T.pack "x") (VInt 1))
+        _ -> pure (Map.singleton (T.pack "x") (VInt 999))
+  let results = runIdentity (replayTrace trace report)
+  case results of
+    [StatesMatch, StateMismatch{}] -> putStrLn "  PASS: matches first, stops on second"
+    _ -> do
+      putStrLn $ "FAIL: expected [StatesMatch, StateMismatch], got " ++ show results
       exitFailure
