@@ -69,6 +69,7 @@ library
         Apalache.Trace,
         Engine,
         Engine.Core,
+        Engine.Handle,
         Engine.Types,
         Protocol.Core,
         Protocol.Format.Json,
