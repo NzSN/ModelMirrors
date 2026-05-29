@@ -133,7 +133,8 @@ test-suite ModelMirros-test
     other-modules:
         Apalache.CommandSpec,
         Apalache.TraceSpec,
-        Apalache.TypesSpec
+        Apalache.TypesSpec,
+        EngineSpec
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
