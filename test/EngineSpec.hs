@@ -2,7 +2,7 @@ module EngineSpec (spec) where
 
 import Apalache.Types (ItfTrace (..), Value (..))
 import Engine.Core (traceSteps, diffState)
-import Engine.Handle (EngineM (..))
+import Engine.Handle (EngineM (..), StateReporter (..))
 import Engine.Types (Step (..), StateDiff (..), VarDiff (..))
 
 import Data.Functor.Identity (runIdentity)
@@ -171,7 +171,7 @@ testReplayEmpty :: IO ()
 testReplayEmpty = do
   putStrLn "[10] replayTrace empty trace ..."
   let trace = ItfTrace [] []
-  let report = \_ -> pure (Map.empty :: Map Text Value)
+  let report = StateReporter (\_ -> pure (Map.empty :: Map Text Value))
   let result = runIdentity (replayTrace trace report)
   if null result
     then putStrLn "  PASS: empty trace yields empty list"
@@ -185,7 +185,7 @@ testReplayAllMatch = do
   let s0 = Map.singleton (T.pack "x") (VInt 1)
   let s1 = Map.singleton (T.pack "x") (VInt 2)
   let trace = ItfTrace [T.pack "x"] [s0, s1]
-  let report step = pure (stepVars step)
+  let report = StateReporter (\step -> pure (stepVars step))
   let results = runIdentity (replayTrace trace report)
   case results of
     [StatesMatch, StatesMatch] -> putStrLn "  PASS: both steps match"
@@ -199,7 +199,7 @@ testReplayFirstMismatch = do
   let s0 = Map.singleton (T.pack "x") (VInt 1)
   let s1 = Map.singleton (T.pack "x") (VInt 2)
   let trace = ItfTrace [T.pack "x"] [s0, s1]
-  let report _step = pure (Map.singleton (T.pack "x") (VInt 999))
+  let report = StateReporter (\_ -> pure (Map.singleton (T.pack "x") (VInt 999)))
   let results = runIdentity (replayTrace trace report)
   case results of
     [StateMismatch{}] -> putStrLn "  PASS: stops on first mismatch"
@@ -213,7 +213,7 @@ testReplaySecondMismatch = do
   let s0 = Map.singleton (T.pack "x") (VInt 1)
   let s1 = Map.singleton (T.pack "x") (VInt 2)
   let trace = ItfTrace [T.pack "x"] [s0, s1]
-  let report step = case stepIdx step of
+  let report = StateReporter $ \step -> case stepIdx step of
         0 -> pure (Map.singleton (T.pack "x") (VInt 1))
         _ -> pure (Map.singleton (T.pack "x") (VInt 999))
   let results = runIdentity (replayTrace trace report)
