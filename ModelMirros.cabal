@@ -67,6 +67,7 @@ library
         Apalache.Types,
         Apalache.Command,
         Apalache.Trace,
+        Engine,
         Engine.Core,
         Engine.Types,
         Protocol.Core,
