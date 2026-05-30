@@ -186,8 +186,8 @@ testReplayAllMatch = do
   let s1 = Map.singleton (T.pack "x") (VInt 2)
   let trace = ItfTrace [T.pack "x"] [s0, s1]
   let report = StateDriver $ \cmd -> pure $ case cmd of
-        CmdInitial s -> s
-        CmdNextStep s -> s
+        CmdInitial _ s -> s
+        CmdNextStep _ s -> s
   let results = runIdentity (replayTrace trace report)
   case results of
     [StatesMatch, StatesMatch] -> putStrLn "  PASS: both steps match"
@@ -216,8 +216,8 @@ testReplaySecondMismatch = do
   let s1 = Map.singleton (T.pack "x") (VInt 2)
   let trace = ItfTrace [T.pack "x"] [s0, s1]
   let report = StateDriver $ \case
-        CmdInitial _ -> pure (Map.singleton (T.pack "x") (VInt 1))
-        CmdNextStep _ -> pure (Map.singleton (T.pack "x") (VInt 999))
+        CmdInitial _ _ -> pure (Map.singleton (T.pack "x") (VInt 1))
+        CmdNextStep _ _ -> pure (Map.singleton (T.pack "x") (VInt 999))
   let results = runIdentity (replayTrace trace report)
   case results of
     [StatesMatch, StateMismatch{}] -> putStrLn "  PASS: matches first, stops on second"

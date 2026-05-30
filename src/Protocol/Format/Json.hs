@@ -12,18 +12,18 @@ import qualified Data.Text as T
 
 instance ToJSON ClientMessage where
   toJSON (Register path config) = object
-    [ fromString "tag" .= T.pack "register"
+    [ fromString "proto_step" .= T.pack "register"
     , fromString "specPath" .= path
     , fromString "traceConfig" .= config
     ]
   toJSON (ReportState state) = object
-    [ fromString "tag" .= T.pack "report_state"
+    [ fromString "proto_step" .= T.pack "report_state"
     , fromString "state" .= state
     ]
 
 instance FromJSON ClientMessage where
   parseJSON = withObject "ClientMessage" $ \o -> do
-    tag <- o .: fromString "tag"
+    tag <- o .: fromString "proto_step"
     case tag of
       t | t == T.pack "register" ->
           Register <$> o .: fromString "specPath" <*> o .: fromString "traceConfig"
@@ -34,43 +34,45 @@ instance FromJSON ClientMessage where
 
 instance ToJSON MirrorMessage where
   toJSON (SpecValidated result) = object
-    [ fromString "tag" .= T.pack "spec_validated"
+    [ fromString "proto_step" .= T.pack "spec_validated"
     , fromString "result" .= result
     ]
-  toJSON (InitialState state) = object
-    [ fromString "tag" .= T.pack "initial_state"
+  toJSON (InitialState action state) = object
+    [ fromString "proto_step" .= T.pack "initial_state"
+    , fromString "action" .= action
     , fromString "state" .= state
     ]
-  toJSON (NextStep state) = object
-    [ fromString "tag" .= T.pack "next_step"
+  toJSON (NextStep action state) = object
+    [ fromString "proto_step" .= T.pack "next_step"
+    , fromString "action" .= action
     , fromString "state" .= state
     ]
   toJSON StepOk = object
-    [ fromString "tag" .= T.pack "step_ok"
+    [ fromString "proto_step" .= T.pack "step_ok"
     ]
   toJSON (StepMismatch expected actual) = object
-    [ fromString "tag" .= T.pack "step_mismatch"
+    [ fromString "proto_step" .= T.pack "step_mismatch"
     , fromString "expected" .= expected
     , fromString "actual" .= actual
     ]
   toJSON AllStepsDone = object
-    [ fromString "tag" .= T.pack "all_steps_done"
+    [ fromString "proto_step" .= T.pack "all_steps_done"
     ]
   toJSON (ProtocolError err) = object
-    [ fromString "tag" .= T.pack "protocol_error"
+    [ fromString "proto_step" .= T.pack "protocol_error"
     , fromString "error" .= err
     ]
 
 instance FromJSON MirrorMessage where
   parseJSON = withObject "MirrorMessage" $ \o -> do
-    tag <- o .: fromString "tag"
+    tag <- o .: fromString "proto_step"
     case tag of
       t | t == T.pack "spec_validated" ->
           SpecValidated <$> o .: fromString "result"
       t | t == T.pack "initial_state" ->
-          InitialState <$> o .: fromString "state"
+          InitialState <$> o .: fromString "action" <*> o .: fromString "state"
       t | t == T.pack "next_step" ->
-          NextStep <$> o .: fromString "state"
+          NextStep <$> o .: fromString "action" <*> o .: fromString "state"
       t | t == T.pack "step_ok" ->
           pure StepOk
       t | t == T.pack "step_mismatch" ->

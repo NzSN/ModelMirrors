@@ -15,8 +15,8 @@ data ClientMessage
 
 data MirrorMessage
   = SpecValidated !ValidateResult
-  | InitialState !(Map Text Value)
-  | NextStep !(Map Text Value)
+  | InitialState !Text !(Map Text Value)
+  | NextStep !Text !(Map Text Value)
   | StepOk
   | StepMismatch !(Map Text Value) !(Map Text Value)
   | AllStepsDone

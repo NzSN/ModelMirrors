@@ -1,4 +1,4 @@
-module Engine.Interactive (stdioDriver) where
+module Engine.Interactive (stdioJSONDriver) where
 
 import qualified Data.Map.Strict as Map
 import Engine.Replay (EngineM, StateDriver (..))
@@ -10,8 +10,8 @@ import Protocol.Transport.Stdio (StdioTransport (..))
 
 instance EngineM IO
 
-stdioDriver :: StateDriver IO
-stdioDriver = StateDriver $ \cmd -> do
+stdioJSONDriver :: StateDriver IO
+stdioJSONDriver = StateDriver $ \cmd -> do
   sendMsg StdioTransport (commandToMessage cmd)
   resp <- recvMsg StdioTransport
   case resp of
@@ -19,5 +19,5 @@ stdioDriver = StateDriver $ \cmd -> do
     _                         -> pure Map.empty
 
 commandToMessage :: StepCommand -> MirrorMessage
-commandToMessage (CmdInitial state) = InitialState state
-commandToMessage (CmdNextStep state) = NextStep state
+commandToMessage (CmdInitial act state) = InitialState act state
+commandToMessage (CmdNextStep act state) = NextStep act state
