@@ -19,5 +19,5 @@ stdioJSONDriver = StateDriver $ \cmd -> do
     _                         -> pure Map.empty
 
 commandToMessage :: StepCommand -> MirrorMessage
-commandToMessage (CmdInitial act state) = InitialState act state
-commandToMessage (CmdNextStep act state) = NextStep act state
+commandToMessage (CmdInitial act) = InitialState act
+commandToMessage (CmdNextStep act) = NextStep act

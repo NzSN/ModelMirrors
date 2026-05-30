@@ -1,5 +1,5 @@
 dist-newstyle/*
-_apalache-out/*
+**/_apalache-out/*
 /.agent-shell/
 TAGS
 tags
