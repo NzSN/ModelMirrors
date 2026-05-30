@@ -2,8 +2,8 @@ module EngineSpec (spec) where
 
 import Apalache.Types (ItfTrace (..), Value (..))
 import Engine.Core (traceSteps, diffState)
-import Engine.Handle (EngineM (..), StateDriver (..))
-import Engine.Types (Step (..), StateDiff (..), VarDiff (..))
+import Engine.Replay (EngineM (..), StateDriver (..))
+import Engine.Types (Step (..), StepCommand (..), StateDiff (..), VarDiff (..))
 
 import Data.Functor.Identity (runIdentity)
 import Data.Map.Strict (Map)
@@ -185,7 +185,9 @@ testReplayAllMatch = do
   let s0 = Map.singleton (T.pack "x") (VInt 1)
   let s1 = Map.singleton (T.pack "x") (VInt 2)
   let trace = ItfTrace [T.pack "x"] [s0, s1]
-  let report = StateDriver (\step -> pure (stepVars step))
+  let report = StateDriver $ \cmd -> pure $ case cmd of
+        CmdInitial s -> s
+        CmdNextStep s -> s
   let results = runIdentity (replayTrace trace report)
   case results of
     [StatesMatch, StatesMatch] -> putStrLn "  PASS: both steps match"
@@ -213,9 +215,9 @@ testReplaySecondMismatch = do
   let s0 = Map.singleton (T.pack "x") (VInt 1)
   let s1 = Map.singleton (T.pack "x") (VInt 2)
   let trace = ItfTrace [T.pack "x"] [s0, s1]
-  let report = StateDriver $ \step -> case stepIdx step of
-        0 -> pure (Map.singleton (T.pack "x") (VInt 1))
-        _ -> pure (Map.singleton (T.pack "x") (VInt 999))
+  let report = StateDriver $ \case
+        CmdInitial _ -> pure (Map.singleton (T.pack "x") (VInt 1))
+        CmdNextStep _ -> pure (Map.singleton (T.pack "x") (VInt 999))
   let results = runIdentity (replayTrace trace report)
   case results of
     [StatesMatch, StateMismatch{}] -> putStrLn "  PASS: matches first, stops on second"

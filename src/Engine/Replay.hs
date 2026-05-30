@@ -1,14 +1,14 @@
-module Engine.Handle (EngineM (..), StateDriver (..)) where
+module Engine.Replay (EngineM (..), StateDriver (..)) where
 
 import Apalache.Types (ItfTrace (..), Value)
 import Data.Functor.Identity (Identity)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Engine.Core (diffState, traceSteps)
-import Engine.Types (Step (..), StateDiff (..))
+import Engine.Types (Step (..), StepCommand (..), StateDiff (..))
 
 newtype StateDriver m = StateDriver
-  { runDriver :: Step -> m (Map Text Value)
+  { runDriver :: StepCommand -> m (Map Text Value)
   }
 
 class Monad m => EngineM m where
@@ -17,7 +17,10 @@ class Monad m => EngineM m where
     where
       go [] = pure []
       go (step : steps) = do
-        actual <- report step
+        let cmd = if stepIdx step == 0
+                  then CmdInitial (stepVars step)
+                  else CmdNextStep (stepVars step)
+        actual <- report cmd
         let diff = diffState (stepVars step) actual
         case diff of
           StatesMatch -> (diff :) <$> go steps

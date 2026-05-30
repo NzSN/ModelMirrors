@@ -9,6 +9,11 @@ data Step = Step
   , stepVars :: !(Map Text Value)
   } deriving (Show, Eq)
 
+data StepCommand
+  = CmdInitial !(Map Text Value)
+  | CmdNextStep !(Map Text Value)
+  deriving (Show, Eq)
+
 data VarDiff
   = ValueMismatch !Text !Value !Value
   | MissingVar    !Text !Value
