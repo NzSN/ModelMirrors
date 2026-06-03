@@ -1,0 +1,56 @@
+module(
+    name = "modelmirros",
+    version = "0.1.0.0",
+)
+
+bazel_dep(name = "rules_haskell", version = "1.0")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+
+rules_haskell_dependencies = use_extension(
+    "@rules_haskell//extensions:rules_haskell_dependencies.bzl",
+    "rules_haskell_dependencies",
+)
+use_repo(
+    rules_haskell_dependencies,
+    "Cabal",
+    "os_info",
+    "rules_haskell_stack",
+    "rules_haskell_stack_update",
+    "rules_haskell_worker_dependencies",
+)
+
+ghc_version = use_extension(
+    "@rules_haskell//extensions:ghc_version.bzl",
+    "ghc_default_version",
+)
+use_repo(ghc_version, "rules_haskell_ghc_version")
+
+haskell_toolchains = use_extension(
+    "@rules_haskell//extensions:haskell_toolchains.bzl",
+    "haskell_toolchains",
+)
+haskell_toolchains.bindists(version = "9.10.1")
+use_repo(haskell_toolchains, "all_bindist_toolchains")
+
+register_toolchains("@all_bindist_toolchains//:all")
+
+stack_snapshot = use_extension(
+    "@rules_haskell//extensions:stack_snapshot.bzl",
+    "stack_snapshot",
+)
+
+stack_snapshot.package(name = "aeson")
+stack_snapshot.package(name = "bytestring")
+stack_snapshot.package(name = "containers")
+stack_snapshot.package(name = "directory")
+stack_snapshot.package(name = "filepath")
+stack_snapshot.package(name = "process")
+stack_snapshot.package(name = "text")
+
+stack_snapshot.package(name = "tasty")
+stack_snapshot.package(name = "tasty-hunit")
+
+stack_snapshot.snapshot(local_snapshot = "@modelmirros//:stackage_snapshot.yaml")
+
+use_repo(stack_snapshot, "stackage", "stackage-exe")
