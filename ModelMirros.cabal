@@ -87,7 +87,7 @@ library
 
     -- Other library packages from which modules are imported.
     build-depends:
-        base        ^>=4.21.0.0,
+        base        ^>=4.22.0.0,
         aeson       >=2.0,
         bytestring  >=0.10,
         containers  >=0.6,
@@ -117,7 +117,7 @@ executable ModelMirros
 
     -- Other library packages from which modules are imported.
     build-depends:
-        base ^>=4.21.0.0,
+        base ^>=4.22.0.0,
         ModelMirros
 
     -- Directories containing source files.
@@ -155,7 +155,7 @@ test-suite ModelMirros-test
 
     -- Test dependencies.
     build-depends:
-        base ^>=4.21.0.0,
+        base ^>=4.22.0.0,
         containers >=0.6,
         text >=1.2,
         ModelMirros
