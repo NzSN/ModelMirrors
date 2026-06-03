@@ -51,7 +51,7 @@ x1 :: Map Text Value
 x1 = Map.singleton (T.pack "x") (VInt 1)
 
 config :: TraceGenerationConfig
-config = TraceGenerationConfig (T.pack "Inv") 10 1
+config = TraceGenerationConfig (T.pack "Inv") 10 1 Nothing T.empty
 
 testCorrectClientSucceeds :: TestTree
 testCorrectClientSucceeds = testCase "correct client succeeds" $ do
@@ -162,9 +162,11 @@ hcApalacheConfig = ApalacheConfig
 
 hcTraceConfig :: TraceGenerationConfig
 hcTraceConfig = TraceGenerationConfig
-  { invariant   = T.pack "TraceComplete"
-  , lengthBound = 13
-  , numTraces   = 1
+  { invariant      = T.pack "TraceComplete"
+  , lengthBound    = 13
+  , numTraces      = 1
+  , cinit          = Nothing
+  , paramVarNames  = T.empty
   }
 
 testHourClock :: TestTree

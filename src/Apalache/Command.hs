@@ -9,6 +9,7 @@ import Apalache.Types
   , ValidateResult (..)
   , TraceGenerationResult (..)
   , ApalacheError (..)
+  , applyParamVars
   )
 import Apalache.Trace (findTraces)
 
@@ -37,9 +38,11 @@ generateTraces cfg tc = do
       pure $ Left $ ApalacheError (T.pack "Could not determine output directory from Apalache output")
     Just outDir -> do
       traces <- findTraces outDir
-      case traces of
+      let pvs = filter (not . T.null) [paramVarNames tc]
+      let traces' = map (applyParamVars pvs) traces
+      case traces' of
         [] -> pure $ Left $ ApalacheError (T.pack "No ITF trace files found in output directory")
-        _  -> pure $ Right $ TracesGenerated traces
+        _  -> pure $ Right $ TracesGenerated traces'
 
 parseOutputDir :: String -> Maybe FilePath
 parseOutputDir = go . lines

@@ -12,7 +12,7 @@ traceSteps trace = zipWith toStep [0..] (traceStates trace)
   where
     toStep i s = Step i (actionTake s) (parameters s)
       (Map.insert (T.pack "action_taken") (VStr (actionTake s))
-      $ Map.union (parameters s) (stateVars s))
+      $ stateVars s)
 
 diffState :: Map Text Value -> Map Text Value -> StateDiff
 diffState expected actual =

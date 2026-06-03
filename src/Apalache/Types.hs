@@ -35,6 +35,8 @@ data TraceGenerationConfig = TraceGenerationConfig
   { invariant   :: !Text
   , lengthBound :: !Int
   , numTraces   :: !Int
+  , cinit       :: !(Maybe Text)
+  , paramVarNames :: !Text
   } deriving (Show, Eq)
 
 instance ToJSON TraceGenerationConfig where
@@ -42,6 +44,8 @@ instance ToJSON TraceGenerationConfig where
     [ fromString "invariant" .= invariant c
     , fromString "lengthBound" .= lengthBound c
     , fromString "numTraces" .= numTraces c
+    , fromString "cinit" .= cinit c
+    , fromString "paramVars" .= paramVarNames c
     ]
 
 instance FromJSON TraceGenerationConfig where
@@ -50,6 +54,8 @@ instance FromJSON TraceGenerationConfig where
       <$> o .: fromString "invariant"
       <*> o .: fromString "lengthBound"
       <*> o .: fromString "numTraces"
+      <*> o .:? fromString "cinit" .!= Nothing
+      <*> o .:? fromString "paramVars" .!= T.empty
 
 data TraceGenerationResult
   = TracesGenerated ![ItfTrace]
@@ -68,8 +74,23 @@ data TraceState = TraceState
 data ItfTrace = ItfTrace
   { traceVars   :: ![Text]
   , paramVars   :: ![Text]
+  , traceParams :: !(Map Text Value)
   , traceStates :: ![TraceState]
   } deriving (Show, Eq)
+
+applyParamVars :: [Text] -> ItfTrace -> ItfTrace
+applyParamVars pvs t = t
+  { paramVars = pvs ++ paramVars t
+  , traceStates = map (resplit pvs (traceVars t)) (traceStates t)
+  }
+  where
+    resplit pvs' vars s = s
+      { actionTake = actionTake s
+      , parameters = Map.filterWithKey (\k _ -> k `elem` pvs')
+        (Map.union (parameters s) (stateVars s))
+      , stateVars  = Map.filterWithKey (\k _ -> k /= T.pack "action_taken" && k `notElem` pvs' && k `elem` vars)
+        (Map.union (parameters s) (stateVars s))
+      }
 
 data Value
   = VInt    !Integer
@@ -90,20 +111,25 @@ instance FromJSON ItfTrace where
   parseJSON = withObject "ItfTrace" $ \o -> do
     vars   <- o .: fromString "vars"
     pvs    <- o .:? fromString "param_vars" .!= ([] :: [Text])
-    states <- o .: fromString "states"
+    cns    <- o .:? fromString "params" .!= ([] :: [Text])
+    rawStates <- o .: fromString "states"
     let split m = TraceState
           { actionTake = case Map.lookup (T.pack "action_taken") m of
               Just (VStr a) -> a
               _             -> T.empty
           , parameters = Map.filterWithKey (\k _ -> k `elem` pvs) m
-          , stateVars  = Map.filterWithKey (\k _ -> k /= T.pack "action_taken" && k `notElem` pvs) m
+          , stateVars  = Map.filterWithKey (\k _ -> k `elem` vars && k /= T.pack "action_taken" && k `notElem` pvs) m
           }
-    pure $ ItfTrace vars pvs (map split states)
+        constants = case rawStates of
+          (m : _) -> Map.filterWithKey (\k _ -> k `elem` cns) m
+          [] -> Map.empty
+    pure $ ItfTrace vars pvs constants (map split rawStates)
 
 instance ToJSON ItfTrace where
   toJSON t = object
     [ fromString "vars" .= traceVars t
     , fromString "param_vars" .= paramVars t
+    , fromString "params" .= Map.keys (traceParams t)
     , fromString "states" .= traceStates t
     ]
 

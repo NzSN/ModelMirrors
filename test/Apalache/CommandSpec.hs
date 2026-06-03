@@ -31,9 +31,11 @@ config = ApalacheConfig
 
 traceConfig :: TraceGenerationConfig
 traceConfig = TraceGenerationConfig
-  { invariant   = T.pack "TraceComplete"
-  , lengthBound = 13
-  , numTraces   = 1
+  { invariant      = T.pack "TraceComplete"
+  , lengthBound    = 13
+  , numTraces      = 1
+  , cinit          = Nothing
+  , paramVarNames  = T.empty
   }
 
 testValidateSpec :: TestTree

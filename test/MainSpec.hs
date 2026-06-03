@@ -9,7 +9,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, assertBool, assertFailure)
 
 spec :: TestTree
-spec = testGroup "MainSpec" [testEndToEnd]
+spec = testGroup "MainSpec" [testEndToEnd, testCounterEndToEnd]
 
 findMirrorBinary :: IO FilePath
 findMirrorBinary = do
@@ -55,6 +55,75 @@ testEndToEnd = testCase "DeterministicCounter end-to-end" $ do
       , ",\"step_count\":{\"#bigint\":\"", show s, "\"}"
       , "}}"
       ]
+
+  putStrLn ""
+  putStrLn "  --- mirror stdout ---"
+
+  (exitCode, stdout, _stderr) <- readProcessWithExitCode bin [] (B8.unpack input)
+
+  case exitCode of
+    ExitFailure n -> assertFailure $ "mirror exited " ++ show n ++ "\nstdout: " ++ stdout
+    ExitSuccess -> pure ()
+
+  let outputLines = lines stdout
+  mapM_ (putStrLn . ("  " ++)) outputLines
+
+  putStrLn ""
+  putStrLn "  --- protocol trace ---"
+
+  let annotated = zipWith annotate [1 :: Int ..] outputLines
+  mapM_ putStrLn annotated
+
+  putStrLn ""
+
+  let
+    traceMsgs =
+      [ "initial_state"
+      , "step_ok", "next_step"
+      , "step_ok", "next_step"
+      , "step_ok", "next_step"
+      , "step_ok", "next_step"
+      , "step_ok", "next_step"
+      , "step_ok"
+      ]
+    expected = ["spec_validated"] ++ traceMsgs ++ traceMsgs ++ ["all_steps_done"]
+
+  assertBool ("expected " ++ show (length expected) ++ " messages, got " ++ show (length outputLines))
+    (length outputLines == length expected)
+
+  let checkMsg ls n step = do
+        let line = ls !! (n - 1)
+            needle = "\"proto_step\":\"" ++ step ++ "\""
+        assertBool ("msg " ++ show n ++ ": expected proto_step=" ++ show step ++ "\n  got: " ++ take 120 line)
+          (needle `isInfixOf` line)
+
+  sequence_ $ zipWith (checkMsg outputLines) [1 :: Int ..] expected
+
+testCounterEndToEnd :: TestTree
+testCounterEndToEnd = testCase "Counter end-to-end" $ do
+  bin <- findMirrorBinary
+  let
+    registerLine =
+      "{\"proto_step\":\"register\",\"specPath\":\"test/specs/Counter.tla\",\"traceConfig\":{\"invariant\":\"TraceComplete\",\"lengthBound\":5,\"numTraces\":1,\"cinit\":\"CInit\",\"paramVars\":\"parameters\"}}"
+
+    mkReport c a s = concat
+      [ "{\"proto_step\":\"report_state\",\"state\":{"
+      , "\"count\":{\"#bigint\":\"", show c, "\"}"
+      , ",\"action_taken\":\"", a, "\""
+      , ",\"step_count\":{\"#bigint\":\"", show s, "\"}"
+      , "}}"
+      ]
+
+    stateLines = concat $ replicate 2
+      [ mkReport 0  "init" 0
+      , mkReport 2  "tick" 1
+      , mkReport 4  "tick" 2
+      , mkReport 6  "tick" 3
+      , mkReport 8  "tick" 4
+      , mkReport 10 "tick" 5
+      ]
+
+    input = B8.pack $ unlines $ registerLine : stateLines
 
   putStrLn ""
   putStrLn "  --- mirror stdout ---"
