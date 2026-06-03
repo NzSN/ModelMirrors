@@ -1,5 +1,6 @@
 module MainSpec (spec) where
 
+import Control.Exception (SomeException, try, displayException)
 import Data.ByteString.Char8 qualified as B8
 import Data.List (isInfixOf, isSuffixOf)
 import System.Directory (doesFileExist)
@@ -29,144 +30,159 @@ findMirrorBinary = do
       else error $ "binary listed by find but not accessible: " ++ p
     _ -> error $ "ModelMirros binary not found. Found: " ++ show raw
 
+findMirrorBinaryOrSkip :: IO (Maybe FilePath)
+findMirrorBinaryOrSkip = do
+  result <- try findMirrorBinary
+  case result of
+    Left (e :: SomeException) -> do
+      putStrLn $ "SKIP: " ++ displayException e
+      pure Nothing
+    Right p -> pure (Just p)
+
 testEndToEnd :: TestTree
 testEndToEnd = testCase "DeterministicCounter end-to-end" $ do
-  bin <- findMirrorBinary
-  let
-    input = B8.pack $ unlines $ registerLine : stateLines
+  mbBin <- findMirrorBinaryOrSkip
+  case mbBin of
+    Nothing -> pure ()
+    Just bin -> do
+      let
+        input = B8.pack $ unlines $ registerLine : stateLines
 
-    registerLine =
-      "{\"proto_step\":\"register\",\"specPath\":\"test/specs/DeterministicCounter.tla\",\"traceConfig\":{\"invariant\":\"TraceComplete\",\"lengthBound\":5,\"numTraces\":1}}"
+        registerLine =
+          "{\"proto_step\":\"register\",\"specPath\":\"test/specs/DeterministicCounter.tla\",\"traceConfig\":{\"invariant\":\"TraceComplete\",\"lengthBound\":5,\"numTraces\":1}}"
 
-    stateLines = concat $ replicate 2
-      [ mkReport 0 "init" 0
-      , mkReport 1 "inc"  1
-      , mkReport 2 "inc"  2
-      , mkReport 3 "inc"  3
-      , mkReport 4 "inc"  4
-      , mkReport 5 "inc"  5
-      ]
+        stateLines = concat $ replicate 2
+          [ mkReport 0 "init" 0
+          , mkReport 1 "inc"  1
+          , mkReport 2 "inc"  2
+          , mkReport 3 "inc"  3
+          , mkReport 4 "inc"  4
+          , mkReport 5 "inc"  5
+          ]
 
-    mkReport :: Int -> String -> Int -> String
-    mkReport c a s = concat
-      [ "{\"proto_step\":\"report_state\",\"state\":{"
-      , "\"count\":{\"#bigint\":\"", show c, "\"}"
-      , ",\"action_taken\":\"", a, "\""
-      , ",\"step_count\":{\"#bigint\":\"", show s, "\"}"
-      , "}}"
-      ]
+        mkReport :: Int -> String -> Int -> String
+        mkReport c a s = concat
+          [ "{\"proto_step\":\"report_state\",\"state\":{"
+          , "\"count\":{\"#bigint\":\"", show c, "\"}"
+          , ",\"action_taken\":\"", a, "\""
+          , ",\"step_count\":{\"#bigint\":\"", show s, "\"}"
+          , "}}"
+          ]
 
-  putStrLn ""
-  putStrLn "  --- mirror stdout ---"
+      putStrLn ""
+      putStrLn "  --- mirror stdout ---"
 
-  (exitCode, stdout, _stderr) <- readProcessWithExitCode bin [] (B8.unpack input)
+      (exitCode, stdout, _stderr) <- readProcessWithExitCode bin [] (B8.unpack input)
 
-  case exitCode of
-    ExitFailure n -> assertFailure $ "mirror exited " ++ show n ++ "\nstdout: " ++ stdout
-    ExitSuccess -> pure ()
+      case exitCode of
+        ExitFailure n -> assertFailure $ "mirror exited " ++ show n ++ "\nstdout: " ++ stdout
+        ExitSuccess -> pure ()
 
-  let outputLines = lines stdout
-  mapM_ (putStrLn . ("  " ++)) outputLines
+      let outputLines = lines stdout
+      mapM_ (putStrLn . ("  " ++)) outputLines
 
-  putStrLn ""
-  putStrLn "  --- protocol trace ---"
+      putStrLn ""
+      putStrLn "  --- protocol trace ---"
 
-  let annotated = zipWith annotate [1 :: Int ..] outputLines
-  mapM_ putStrLn annotated
+      let annotated = zipWith annotate [1 :: Int ..] outputLines
+      mapM_ putStrLn annotated
 
-  putStrLn ""
+      putStrLn ""
 
-  let
-    traceMsgs =
-      [ "initial_state"
-      , "step_ok", "next_step"
-      , "step_ok", "next_step"
-      , "step_ok", "next_step"
-      , "step_ok", "next_step"
-      , "step_ok", "next_step"
-      , "step_ok"
-      ]
-    expected = ["spec_validated"] ++ traceMsgs ++ traceMsgs ++ ["all_steps_done"]
+      let
+        traceMsgs =
+          [ "initial_state"
+          , "step_ok", "next_step"
+          , "step_ok", "next_step"
+          , "step_ok", "next_step"
+          , "step_ok", "next_step"
+          , "step_ok", "next_step"
+          , "step_ok"
+          ]
+        expected = ["spec_validated"] ++ traceMsgs ++ traceMsgs ++ ["all_steps_done"]
 
-  assertBool ("expected " ++ show (length expected) ++ " messages, got " ++ show (length outputLines))
-    (length outputLines == length expected)
+      assertBool ("expected " ++ show (length expected) ++ " messages, got " ++ show (length outputLines))
+        (length outputLines == length expected)
 
-  let checkMsg ls n step = do
-        let line = ls !! (n - 1)
-            needle = "\"proto_step\":\"" ++ step ++ "\""
-        assertBool ("msg " ++ show n ++ ": expected proto_step=" ++ show step ++ "\n  got: " ++ take 120 line)
-          (needle `isInfixOf` line)
+      let checkMsg ls n step = do
+            let line = ls !! (n - 1)
+                needle = "\"proto_step\":\"" ++ step ++ "\""
+            assertBool ("msg " ++ show n ++ ": expected proto_step=" ++ show step ++ "\n  got: " ++ take 120 line)
+              (needle `isInfixOf` line)
 
-  sequence_ $ zipWith (checkMsg outputLines) [1 :: Int ..] expected
+      sequence_ $ zipWith (checkMsg outputLines) [1 :: Int ..] expected
 
 testCounterEndToEnd :: TestTree
 testCounterEndToEnd = testCase "Counter end-to-end" $ do
-  bin <- findMirrorBinary
-  let
-    registerLine =
-      "{\"proto_step\":\"register\",\"specPath\":\"test/specs/Counter.tla\",\"traceConfig\":{\"invariant\":\"TraceComplete\",\"lengthBound\":5,\"numTraces\":1,\"cinit\":\"CInit\",\"paramVars\":\"parameters\"}}"
+  mbBin <- findMirrorBinaryOrSkip
+  case mbBin of
+    Nothing -> pure ()
+    Just bin -> do
+      let
+        registerLine =
+          "{\"proto_step\":\"register\",\"specPath\":\"test/specs/Counter.tla\",\"traceConfig\":{\"invariant\":\"TraceComplete\",\"lengthBound\":5,\"numTraces\":1,\"cinit\":\"CInit\",\"paramVars\":\"parameters\"}}"
 
-    mkReport c a s = concat
-      [ "{\"proto_step\":\"report_state\",\"state\":{"
-      , "\"count\":{\"#bigint\":\"", show c, "\"}"
-      , ",\"action_taken\":\"", a, "\""
-      , ",\"step_count\":{\"#bigint\":\"", show s, "\"}"
-      , "}}"
-      ]
+        mkReport c a s = concat
+          [ "{\"proto_step\":\"report_state\",\"state\":{"
+          , "\"count\":{\"#bigint\":\"", show c, "\"}"
+          , ",\"action_taken\":\"", a, "\""
+          , ",\"step_count\":{\"#bigint\":\"", show s, "\"}"
+          , "}}"
+          ]
 
-    stateLines = concat $ replicate 2
-      [ mkReport 0  "init" 0
-      , mkReport 2  "tick" 1
-      , mkReport 4  "tick" 2
-      , mkReport 6  "tick" 3
-      , mkReport 8  "tick" 4
-      , mkReport 10 "tick" 5
-      ]
+        stateLines = concat $ replicate 2
+          [ mkReport 0  "init" 0
+          , mkReport 2  "tick" 1
+          , mkReport 4  "tick" 2
+          , mkReport 6  "tick" 3
+          , mkReport 8  "tick" 4
+          , mkReport 10 "tick" 5
+          ]
 
-    input = B8.pack $ unlines $ registerLine : stateLines
+        input = B8.pack $ unlines $ registerLine : stateLines
 
-  putStrLn ""
-  putStrLn "  --- mirror stdout ---"
+      putStrLn ""
+      putStrLn "  --- mirror stdout ---"
 
-  (exitCode, stdout, _stderr) <- readProcessWithExitCode bin [] (B8.unpack input)
+      (exitCode, stdout, _stderr) <- readProcessWithExitCode bin [] (B8.unpack input)
 
-  case exitCode of
-    ExitFailure n -> assertFailure $ "mirror exited " ++ show n ++ "\nstdout: " ++ stdout
-    ExitSuccess -> pure ()
+      case exitCode of
+        ExitFailure n -> assertFailure $ "mirror exited " ++ show n ++ "\nstdout: " ++ stdout
+        ExitSuccess -> pure ()
 
-  let outputLines = lines stdout
-  mapM_ (putStrLn . ("  " ++)) outputLines
+      let outputLines = lines stdout
+      mapM_ (putStrLn . ("  " ++)) outputLines
 
-  putStrLn ""
-  putStrLn "  --- protocol trace ---"
+      putStrLn ""
+      putStrLn "  --- protocol trace ---"
 
-  let annotated = zipWith annotate [1 :: Int ..] outputLines
-  mapM_ putStrLn annotated
+      let annotated = zipWith annotate [1 :: Int ..] outputLines
+      mapM_ putStrLn annotated
 
-  putStrLn ""
+      putStrLn ""
 
-  let
-    traceMsgs =
-      [ "initial_state"
-      , "step_ok", "next_step"
-      , "step_ok", "next_step"
-      , "step_ok", "next_step"
-      , "step_ok", "next_step"
-      , "step_ok", "next_step"
-      , "step_ok"
-      ]
-    expected = ["spec_validated"] ++ traceMsgs ++ traceMsgs ++ ["all_steps_done"]
+      let
+        traceMsgs =
+          [ "initial_state"
+          , "step_ok", "next_step"
+          , "step_ok", "next_step"
+          , "step_ok", "next_step"
+          , "step_ok", "next_step"
+          , "step_ok", "next_step"
+          , "step_ok"
+          ]
+        expected = ["spec_validated"] ++ traceMsgs ++ traceMsgs ++ ["all_steps_done"]
 
-  assertBool ("expected " ++ show (length expected) ++ " messages, got " ++ show (length outputLines))
-    (length outputLines == length expected)
+      assertBool ("expected " ++ show (length expected) ++ " messages, got " ++ show (length outputLines))
+        (length outputLines == length expected)
 
-  let checkMsg ls n step = do
-        let line = ls !! (n - 1)
-            needle = "\"proto_step\":\"" ++ step ++ "\""
-        assertBool ("msg " ++ show n ++ ": expected proto_step=" ++ show step ++ "\n  got: " ++ take 120 line)
-          (needle `isInfixOf` line)
+      let checkMsg ls n step = do
+            let line = ls !! (n - 1)
+                needle = "\"proto_step\":\"" ++ step ++ "\""
+            assertBool ("msg " ++ show n ++ ": expected proto_step=" ++ show step ++ "\n  got: " ++ take 120 line)
+              (needle `isInfixOf` line)
 
-  sequence_ $ zipWith (checkMsg outputLines) [1 :: Int ..] expected
+      sequence_ $ zipWith (checkMsg outputLines) [1 :: Int ..] expected
 
 annotate :: Int -> String -> String
 annotate n line

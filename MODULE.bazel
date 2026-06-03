@@ -54,3 +54,9 @@ stack_snapshot.package(name = "tasty-hunit")
 stack_snapshot.snapshot(local_snapshot = "@modelmirros//:stackage_snapshot.yaml")
 
 use_repo(stack_snapshot, "stackage", "stackage-exe")
+
+apalache_mc_repo = use_repo_rule(
+    "//apalache-mc:repo.bzl",
+    "apalache_mc_repository",
+)
+apalache_mc_repo(name = "apalache_mc")
