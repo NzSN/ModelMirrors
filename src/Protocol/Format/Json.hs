@@ -37,9 +37,10 @@ instance ToJSON MirrorMessage where
     [ fromString "proto_step" .= T.pack "spec_validated"
     , fromString "result" .= result
     ]
-  toJSON (InitialState action) = object
+  toJSON (InitialState action state) = object
     [ fromString "proto_step" .= T.pack "initial_state"
     , fromString "action" .= action
+    , fromString "state" .= state
     ]
   toJSON (NextStep action) = object
     [ fromString "proto_step" .= T.pack "next_step"
@@ -68,7 +69,7 @@ instance FromJSON MirrorMessage where
       t | t == T.pack "spec_validated" ->
           SpecValidated <$> o .: fromString "result"
       t | t == T.pack "initial_state" ->
-          InitialState <$> o .: fromString "action"
+          InitialState <$> o .: fromString "action" <*> o .: fromString "state"
       t | t == T.pack "next_step" ->
           NextStep <$> o .: fromString "action"
       t | t == T.pack "step_ok" ->

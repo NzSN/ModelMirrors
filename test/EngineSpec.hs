@@ -113,7 +113,7 @@ testReplayAllMatch = testCase "replayTrace all match" $ do
       s1 = Map.singleton (T.pack "x") (VInt 2)
       trace = ItfTrace [T.pack "x"] [s0, s1]
       report = StateDriver $ \cmd -> pure $ case cmd of
-        CmdInitial _ -> s0
+        CmdInitial _ _ -> s0
         CmdNextStep _ -> s1
   runIdentity (replayTrace trace report) @?= [StatesMatch, StatesMatch]
 
@@ -133,7 +133,7 @@ testReplaySecondMismatch = testCase "replayTrace second mismatch" $ do
       s1 = Map.singleton (T.pack "x") (VInt 2)
       trace = ItfTrace [T.pack "x"] [s0, s1]
       report = StateDriver $ \case
-        CmdInitial _ -> pure (Map.singleton (T.pack "x") (VInt 1))
+        CmdInitial _ _ -> pure (Map.singleton (T.pack "x") (VInt 1))
         CmdNextStep _ -> pure (Map.singleton (T.pack "x") (VInt 999))
   case runIdentity (replayTrace trace report) of
     [StatesMatch, StateMismatch{}] -> pure ()

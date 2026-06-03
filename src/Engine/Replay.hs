@@ -30,7 +30,7 @@ class Monad m => EngineM m where
       go (step : steps) = do
         let action = stepAction step
             cmd = if stepIdx step == 0
-                  then CmdInitial action
+                  then CmdInitial action (stepVars step)
                   else CmdNextStep action
         actual <- report cmd
         let diff = diffState (stepVars step) actual

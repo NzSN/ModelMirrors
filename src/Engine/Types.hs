@@ -10,7 +10,7 @@ data Step = Step
   } deriving (Show, Eq)
 
 data StepCommand
-  = CmdInitial !Text
+  = CmdInitial !Text !(Map Text Value)
   | CmdNextStep !Text
   deriving (Show, Eq)
 

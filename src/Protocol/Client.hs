@@ -33,7 +33,7 @@ stepLoop :: Transport t => Client t -> IO (Either Text ())
 stepLoop client = do
   recvMsg (clientTransport client) >>= \case
     Left err                  -> pure (Left (T.pack err))
-    Right (InitialState a)    -> handleStep client a
+    Right (InitialState a _)  -> handleStep client a
     Right (NextStep a)        -> handleStep client a
     Right AllStepsDone        -> pure (Right ())
     Right (ProtocolError e)   -> pure (Left e)

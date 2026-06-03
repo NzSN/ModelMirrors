@@ -51,7 +51,7 @@ testCorrectClientSucceeds = testCase "correct client succeeds" $ do
     Right (Register _ _) -> pure ()
     other -> assertFailure $ "expected Register, got " ++ show other
   sendMsg mEnd (SpecValidated SpecValid)
-  sendMsg mEnd (InitialState (T.pack "Init"))
+  sendMsg mEnd (InitialState (T.pack "Init") Map.empty)
   recvMsg mEnd >>= \case
     Right (ReportState s) -> s @?= x0
     other -> assertFailure $ "expected ReportState, got " ++ show other
@@ -72,7 +72,7 @@ testMismatchDetected = testCase "mismatch detected" $ do
   mv <- forkClient client "spec.tla" config
   (_ :: Either String ClientMessage) <- recvMsg mEnd
   sendMsg mEnd (SpecValidated SpecValid)
-  sendMsg mEnd (InitialState (T.pack "Init"))
+  sendMsg mEnd (InitialState (T.pack "Init") Map.empty)
   (_ :: Either String ClientMessage) <- recvMsg mEnd
   sendMsg mEnd (StepMismatch x0 (Map.singleton (T.pack "x") (VInt 999)))
   result <- awaitResult mv
@@ -88,7 +88,7 @@ testCannedClient = testCase "cannedClient responses in order" $ do
   mv <- forkClient client "spec.tla" config
   (_ :: Either String ClientMessage) <- recvMsg mEnd
   sendMsg mEnd (SpecValidated SpecValid)
-  sendMsg mEnd (InitialState (T.pack "Init"))
+  sendMsg mEnd (InitialState (T.pack "Init") Map.empty)
   recvMsg mEnd >>= \case
     Right (ReportState s) -> s @?= x0
     other -> assertFailure $ "expected ReportState, got " ++ show other
@@ -115,7 +115,7 @@ testFixedClient = testCase "fixedClient always returns same state" $ do
   mv <- forkClient client "spec.tla" config
   (_ :: Either String ClientMessage) <- recvMsg mEnd
   sendMsg mEnd (SpecValidated SpecValid)
-  sendMsg mEnd (InitialState (T.pack "Init"))
+  sendMsg mEnd (InitialState (T.pack "Init") Map.empty)
   recvMsg mEnd >>= \case
     Right (ReportState s) -> s @?= fixedState
     other -> assertFailure $ "expected ReportState, got " ++ show other
