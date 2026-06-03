@@ -1,0 +1,1 @@
+load("@rules_haskell//haskell:defs.bzl", "haskell_toolchain_library")

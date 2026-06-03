@@ -1,0 +1,5 @@
+# Test output
+test --test_output=errors
+
+# Build options
+build --experimental_ui_event_max_actions=10000
