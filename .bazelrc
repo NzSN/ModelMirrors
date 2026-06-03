@@ -1,2 +1,3 @@
 # Test output
 test --test_output=errors
+common --noincompatible_disallow_ctx_resolve_tools

@@ -4,6 +4,20 @@ module(
 )
 
 bazel_dep(name = "rules_haskell", version = "1.0")
+
+# rules_haskell v1.0 and rules_sh v0.5.0 are not Bazel 8 compatible.
+# Use master branches which have the get_cpu_value fix.
+git_override(
+    module_name = "rules_haskell",
+    remote = "https://github.com/tweag/rules_haskell",
+    commit = "b459268dee8e73244babdaa84c4feb7796e923df",
+)
+
+git_override(
+    module_name = "rules_sh",
+    remote = "https://github.com/tweag/rules_sh",
+    commit = "c28667efc2fd9c95ceada90ce2b27d928fa36971",
+)
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.2")
 

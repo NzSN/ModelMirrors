@@ -18,7 +18,7 @@ There is no lint, format, typecheck, or CI config. Build with `-Wall` (set in `.
 
 ## Prerequisites
 
-- Bazel 7.4.0
+- Bazel 8.0.0
 - GHC 9.10+ (bindist GHC 9.10.1 managed by Bazel; cabal uses local GHC)
 - `apalache-mc` on `PATH` (tests shell out to it)
 
