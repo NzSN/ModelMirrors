@@ -65,9 +65,16 @@ stack_snapshot.package(name = "text")
 stack_snapshot.package(name = "tasty")
 stack_snapshot.package(name = "tasty-hunit")
 
-stack_snapshot.snapshot(local_snapshot = "@modelmirros//:stackage_snapshot.yaml")
-
 use_repo(stack_snapshot, "stackage", "stackage-exe")
+
+# Dev-only extension instance for snapshot (only when modelmirros is root module).
+# The non-dev extension above relies on the consuming root module to provide the snapshot.
+stack_snapshot_dev = use_extension(
+    "@rules_haskell//extensions:stack_snapshot.bzl",
+    "stack_snapshot",
+    dev_dependency = True,
+)
+stack_snapshot_dev.snapshot(local_snapshot = "@modelmirros//:stackage_snapshot.yaml")
 
 apalache_mc_repo = use_repo_rule(
     "//apalache-mc:repo.bzl",

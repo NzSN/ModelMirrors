@@ -826,7 +826,7 @@
     "@@rules_haskell+//extensions:stack_snapshot.bzl%stack_snapshot": {
       "general": {
         "bzlTransitiveDigest": "ySoY1SHg4ASusWox1al8KfhaymbffqpLolAv3HOdW7A=",
-        "usagesDigest": "Bh+cSdgahWd0eHk1Kltz3XNBrXukqM9w+1DjU/XbWT0=",
+        "usagesDigest": "IFGiO3GkLbIQB79LK2nw79A6H1wu96xxqHl+BinLTBg=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
