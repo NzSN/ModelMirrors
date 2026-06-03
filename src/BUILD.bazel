@@ -1,0 +1,18 @@
+load("@rules_haskell//haskell:defs.bzl", "haskell_library")
+
+haskell_library(
+    name = "ModelMirros",
+    srcs = glob(["**/*.hs"]),
+    ghcopts = ["-Wall", "-XGHC2024"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@stackage//:aeson",
+        "//:base",
+        "@stackage//:bytestring",
+        "@stackage//:containers",
+        "@stackage//:directory",
+        "@stackage//:filepath",
+        "@stackage//:process",
+        "@stackage//:text",
+    ],
+)
