@@ -6,12 +6,14 @@ import qualified Apalache.TypesSpec as TypesSpec
 import qualified ClientSpec
 import qualified EngineSpec
 import qualified MainSpec
+import Test.Tasty (defaultMain, testGroup)
 
 main :: IO ()
-main = do
-  ClientSpec.spec
-  EngineSpec.spec
-  CommandSpec.spec
-  TraceSpec.spec
-  TypesSpec.spec
-  MainSpec.spec
+main = defaultMain $ testGroup "ModelMirros"
+  [ ClientSpec.spec
+  , EngineSpec.spec
+  , CommandSpec.spec
+  , TraceSpec.spec
+  , TypesSpec.spec
+  , MainSpec.spec
+  ]

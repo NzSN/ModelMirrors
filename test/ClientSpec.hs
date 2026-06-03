@@ -12,26 +12,17 @@ import Protocol.Core
 import Protocol.Format.Json ()
 import Protocol.Transport.Core (recvMsg, sendMsg)
 import Protocol.Transport.Mock (MockTransport, newMockTransport)
-import System.Exit (exitFailure)
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, (@?=), assertFailure)
 
-spec :: IO ()
-spec = do
-  putStrLn "=== ClientSpec ==="
-  testCorrectClientSucceeds
-  testMismatchDetected
-  testCannedClient
-  testFixedClient
-  testSpecInvalid
-
-expect :: (Eq a, Show a) => a -> a -> String -> IO ()
-expect actual expected label = do
-  if actual == expected
-    then putStrLn $ "  PASS: " ++ label
-    else do
-      putStrLn $ "  FAIL: " ++ label
-      putStrLn $ "    expected: " ++ show expected
-      putStrLn $ "    got:      " ++ show actual
-      exitFailure
+spec :: TestTree
+spec = testGroup "ClientSpec"
+  [ testCorrectClientSucceeds
+  , testMismatchDetected
+  , testCannedClient
+  , testFixedClient
+  , testSpecInvalid
+  ]
 
 awaitResult :: MVar (Either Text ()) -> IO (Either Text ())
 awaitResult = takeMVar
@@ -51,33 +42,31 @@ x1 = Map.singleton (T.pack "x") (VInt 1)
 config :: TraceGenerationConfig
 config = TraceGenerationConfig (T.pack "Inv") 10 1
 
-testCorrectClientSucceeds :: IO ()
-testCorrectClientSucceeds = do
-  putStrLn "[1] correct client completes successfully"
+testCorrectClientSucceeds :: TestTree
+testCorrectClientSucceeds = testCase "correct client succeeds" $ do
   (cEnd, mEnd) <- newMockTransport
   client <- cannedClient cEnd [x0, x1]
   mv <- forkClient client "spec.tla" config
   recvMsg mEnd >>= \case
     Right (Register _ _) -> pure ()
-    other                -> unexpected "Register" other
+    other -> assertFailure $ "expected Register, got " ++ show other
   sendMsg mEnd (SpecValidated SpecValid)
   sendMsg mEnd (InitialState (T.pack "Init"))
   recvMsg mEnd >>= \case
-    Right (ReportState s) -> expect s x0 "client reported initial state"
-    other                 -> unexpected "ReportState" other
+    Right (ReportState s) -> s @?= x0
+    other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
   sendMsg mEnd (NextStep (T.pack "Advance"))
   recvMsg mEnd >>= \case
-    Right (ReportState s) -> expect s x1 "client reported next state"
-    other                 -> unexpected "ReportState" other
+    Right (ReportState s) -> s @?= x1
+    other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
   sendMsg mEnd AllStepsDone
   result <- awaitResult mv
-  expect result (Right ()) "client returned Right ()"
+  result @?= Right ()
 
-testMismatchDetected :: IO ()
-testMismatchDetected = do
-  putStrLn "[2] mismatch is detected when client returns wrong state"
+testMismatchDetected :: TestTree
+testMismatchDetected = testCase "mismatch detected" $ do
   (cEnd, mEnd) <- newMockTransport
   let client = fixedClient cEnd (Map.singleton (T.pack "x") (VInt 999))
   mv <- forkClient client "spec.tla" config
@@ -88,14 +77,11 @@ testMismatchDetected = do
   sendMsg mEnd (StepMismatch x0 (Map.singleton (T.pack "x") (VInt 999)))
   result <- awaitResult mv
   case result of
-    Left e  -> putStrLn $ "  PASS: client got error: " ++ T.unpack e
-    Right _ -> do
-      putStrLn "  FAIL: expected mismatch error"
-      exitFailure
+    Left _ -> pure ()
+    Right _ -> assertFailure "expected mismatch error, got Right"
 
-testCannedClient :: IO ()
-testCannedClient = do
-  putStrLn "[3] cannedClient returns pre-canned responses in order"
+testCannedClient :: TestTree
+testCannedClient = testCase "cannedClient responses in order" $ do
   (cEnd, mEnd) <- newMockTransport
   let responses = [x0, x1, Map.singleton (T.pack "x") (VInt 2)]
   client <- cannedClient cEnd responses
@@ -104,26 +90,25 @@ testCannedClient = do
   sendMsg mEnd (SpecValidated SpecValid)
   sendMsg mEnd (InitialState (T.pack "Init"))
   recvMsg mEnd >>= \case
-    Right (ReportState s) -> expect s x0 "canned[0]"
-    other                 -> unexpected "ReportState" other
+    Right (ReportState s) -> s @?= x0
+    other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
   sendMsg mEnd (NextStep (T.pack "Advance"))
   recvMsg mEnd >>= \case
-    Right (ReportState s) -> expect s x1 "canned[1]"
-    other                 -> unexpected "ReportState" other
+    Right (ReportState s) -> s @?= x1
+    other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
   sendMsg mEnd (NextStep (T.pack "Advance"))
   recvMsg mEnd >>= \case
-    Right (ReportState s) -> expect s (Map.singleton (T.pack "x") (VInt 2)) "canned[2]"
-    other                 -> unexpected "ReportState" other
+    Right (ReportState s) -> s @?= Map.singleton (T.pack "x") (VInt 2)
+    other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
   sendMsg mEnd AllStepsDone
   result <- awaitResult mv
-  expect result (Right ()) "canned client completed"
+  result @?= Right ()
 
-testFixedClient :: IO ()
-testFixedClient = do
-  putStrLn "[4] fixedClient always returns the same state"
+testFixedClient :: TestTree
+testFixedClient = testCase "fixedClient always returns same state" $ do
   (cEnd, mEnd) <- newMockTransport
   let fixedState = Map.singleton (T.pack "y") (VInt 42)
       client = fixedClient cEnd fixedState
@@ -132,21 +117,20 @@ testFixedClient = do
   sendMsg mEnd (SpecValidated SpecValid)
   sendMsg mEnd (InitialState (T.pack "Init"))
   recvMsg mEnd >>= \case
-    Right (ReportState s) -> expect s fixedState "fixed returns same state"
-    other                 -> unexpected "ReportState" other
+    Right (ReportState s) -> s @?= fixedState
+    other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
   sendMsg mEnd (NextStep (T.pack "Advance"))
   recvMsg mEnd >>= \case
-    Right (ReportState s) -> expect s fixedState "fixed returns same state again"
-    other                 -> unexpected "ReportState" other
+    Right (ReportState s) -> s @?= fixedState
+    other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
   sendMsg mEnd AllStepsDone
   result <- awaitResult mv
-  expect result (Right ()) "fixed client completed"
+  result @?= Right ()
 
-testSpecInvalid :: IO ()
-testSpecInvalid = do
-  putStrLn "[5] SpecInvalid is returned as an error"
+testSpecInvalid :: TestTree
+testSpecInvalid = testCase "SpecInvalid returned as error" $ do
   (cEnd, mEnd) <- newMockTransport
   let client = fixedClient cEnd Map.empty
   mv <- forkClient client "spec.tla" config
@@ -154,16 +138,5 @@ testSpecInvalid = do
   sendMsg mEnd (SpecValidated (SpecInvalid (T.pack "typecheck failed")))
   result <- awaitResult mv
   case result of
-    Left e | T.pack "typecheck failed" == e ->
-      putStrLn "  PASS: got expected error"
-    Left e -> do
-      putStrLn $ "  FAIL: unexpected error: " ++ T.unpack e
-      exitFailure
-    Right _ -> do
-      putStrLn "  FAIL: expected Left, got Right"
-      exitFailure
-
-unexpected :: Show a => String -> a -> IO ()
-unexpected label msg = do
-  putStrLn $ "  FAIL: expected " ++ label ++ ", got: " ++ show msg
-  exitFailure
+    Left e -> e @?= T.pack "typecheck failed"
+    Right _ -> assertFailure "expected Left, got Right"

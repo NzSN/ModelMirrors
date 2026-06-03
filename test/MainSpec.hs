@@ -3,14 +3,13 @@ module MainSpec (spec) where
 import Data.ByteString.Char8 qualified as B8
 import Data.List (isInfixOf, isSuffixOf)
 import System.Directory (doesFileExist)
-import System.Exit (ExitCode (..), exitFailure)
+import System.Exit (ExitCode (..))
 import System.Process (readProcess, readProcessWithExitCode)
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, assertBool, assertFailure)
 
-spec :: IO ()
-spec = do
-  putStrLn "=== MainSpec ==="
-  bin <- findMirrorBinary
-  testEndToEnd bin
+spec :: TestTree
+spec = testGroup "MainSpec" [testEndToEnd]
 
 findMirrorBinary :: IO FilePath
 findMirrorBinary = do
@@ -30,9 +29,9 @@ findMirrorBinary = do
       else error $ "binary listed by find but not accessible: " ++ p
     _ -> error $ "ModelMirros binary not found. Found: " ++ show raw
 
-testEndToEnd :: FilePath -> IO ()
-testEndToEnd bin = do
-  putStrLn "[1] DeterministicCounter end-to-end protocol ..."
+testEndToEnd :: TestTree
+testEndToEnd = testCase "DeterministicCounter end-to-end" $ do
+  bin <- findMirrorBinary
   let
     input = B8.pack $ unlines $ registerLine : stateLines
 
@@ -60,14 +59,10 @@ testEndToEnd bin = do
   putStrLn ""
   putStrLn "  --- mirror stdout ---"
 
-  (exitCode, stdout, stderr) <- readProcessWithExitCode bin [] (B8.unpack input)
+  (exitCode, stdout, _stderr) <- readProcessWithExitCode bin [] (B8.unpack input)
 
   case exitCode of
-    ExitFailure n -> do
-      putStrLn $ "  FAIL: mirror exited " ++ show n
-      putStrLn $ "  stdout: " ++ stdout
-      putStrLn $ "  stderr: " ++ stderr
-      exitFailure
+    ExitFailure n -> assertFailure $ "mirror exited " ++ show n ++ "\nstdout: " ++ stdout
     ExitSuccess -> pure ()
 
   let outputLines = lines stdout
@@ -80,12 +75,8 @@ testEndToEnd bin = do
   mapM_ putStrLn annotated
 
   putStrLn ""
-  checkProtocol outputLines
 
-checkProtocol :: [String] -> IO ()
-checkProtocol outputLines = do
   let
-    -- Per 6-step trace: initial_state + 5x(step_ok, next_step) + final step_ok
     traceMsgs =
       [ "initial_state"
       , "step_ok", "next_step"
@@ -97,29 +88,16 @@ checkProtocol outputLines = do
       ]
     expected = ["spec_validated"] ++ traceMsgs ++ traceMsgs ++ ["all_steps_done"]
 
-  if length outputLines /= length expected
-    then do
-      putStrLn $ "FAIL: expected " ++ show (length expected)
-        ++ " messages, got " ++ show (length outputLines)
-      putStrLn "Output:"
-      mapM_ (\l -> putStrLn $ "  " ++ take 100 l) outputLines
-      exitFailure
-    else pure ()
+  assertBool ("expected " ++ show (length expected) ++ " messages, got " ++ show (length outputLines))
+    (length outputLines == length expected)
+
+  let checkMsg ls n step = do
+        let line = ls !! (n - 1)
+            needle = "\"proto_step\":\"" ++ step ++ "\""
+        assertBool ("msg " ++ show n ++ ": expected proto_step=" ++ show step ++ "\n  got: " ++ take 120 line)
+          (needle `isInfixOf` line)
 
   sequence_ $ zipWith (checkMsg outputLines) [1 :: Int ..] expected
-  putStrLn "  PASS: all 26 protocol messages in correct order"
-
-checkMsg :: [String] -> Int -> String -> IO ()
-checkMsg ls n step = do
-  let line = ls !! (n - 1)
-      needle = "\"proto_step\":\"" ++ step ++ "\""
-  if needle `isInfixOf` line
-    then pure ()
-    else do
-      putStrLn $ "FAIL at msg " ++ show n
-        ++ ": expected proto_step=" ++ show step
-      putStrLn $ "  got: " ++ take 120 line
-      exitFailure
 
 annotate :: Int -> String -> String
 annotate n line

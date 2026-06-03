@@ -11,15 +11,16 @@ import Apalache.Command (generateTraces)
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
-import System.Exit (exitFailure)
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, (@?=), assertBool, assertFailure)
 
-spec :: IO ()
-spec = do
-  putStrLn "=== TypesSpec ==="
-  testReadTrace
-  testFindTraces
-  testItfTraceStructure
-  testStateValues
+spec :: TestTree
+spec = testGroup "TypesSpec"
+  [ testReadTrace
+  , testFindTraces
+  , testItfTraceStructure
+  , testStateValues
+  ]
 
 specFile :: FilePath
 specFile = "test/specs/HourClock.tla"
@@ -39,40 +40,25 @@ traceConfig = TraceGenerationConfig
   , numTraces   = 1
   }
 
--- Test: readTrace parses an ITF JSON file without errors.
-testReadTrace :: IO ()
-testReadTrace = do
-  putStrLn "[1] readTrace ..."
+testReadTrace :: TestTree
+testReadTrace = testCase "readTrace" $ do
   result <- generateTraces config traceConfig
   case result of
     Right (TracesGenerated (trace : _)) -> do
       let n = length (traceStates trace)
-      putStrLn $ "  PASS: readTrace parsed " ++ show n ++ " states"
-    _ -> do
-      putStrLn "FAIL: readTrace could not parse trace"
-      exitFailure
+      assertBool "readTrace parsed 0 states" (n > 0)
+    _ -> assertFailure "could not parse trace"
 
--- Test: findTraces discovers ITF JSON files from an Apalache output directory.
-testFindTraces :: IO ()
-testFindTraces = do
-  putStrLn "[2] findTraces ..."
+testFindTraces :: TestTree
+testFindTraces = testCase "findTraces" $ do
   result <- generateTraces config traceConfig
   case result of
-    Right (TracesGenerated traces) -> do
-      let n = length traces
-      if n > 0
-        then putStrLn $ "  PASS: findTraces found " ++ show n ++ " trace file(s)"
-        else do
-          putStrLn "FAIL: findTraces found no trace files"
-          exitFailure
-    _ -> do
-      putStrLn "FAIL: could not generate traces for findTraces test"
-      exitFailure
+    Right (TracesGenerated traces) ->
+      assertBool "findTraces found no trace files" (length traces > 0)
+    _ -> assertFailure "could not generate traces"
 
--- Test: the parsed ItfTrace has the expected structure.
-testItfTraceStructure :: IO ()
-testItfTraceStructure = do
-  putStrLn "[3] ItfTrace structure ..."
+testItfTraceStructure :: TestTree
+testItfTraceStructure = testCase "ItfTrace structure" $ do
   result <- generateTraces config traceConfig
   case result of
     Right (TracesGenerated (trace : _)) -> do
@@ -84,76 +70,32 @@ testItfTraceStructure = do
             , T.pack "action_taken"
             , T.pack "nondet_picks"
             ]
-      if traceVars trace /= expectedVars
-        then do
-          putStrLn $ "FAIL: unexpected vars: " ++ show (traceVars trace)
-          exitFailure
-        else
-          putStrLn "  PASS: variable names match"
+      traceVars trace @?= expectedVars
+      length (traceStates trace) @?= 14
+    _ -> assertFailure "could not get trace for structure test"
 
-      let n = length (traceStates trace)
-      if n /= 14
-        then do
-          putStrLn $ "FAIL: expected 14 states, got " ++ show n
-          exitFailure
-        else
-          putStrLn "  PASS: 14 states (init + 13 ticks)"
-    _ -> do
-      putStrLn "FAIL: could not get trace for structure test"
-      exitFailure
-
--- Test: individual state values parse correctly.
-testStateValues :: IO ()
-testStateValues = do
-  putStrLn "[4] state values ..."
+testStateValues :: TestTree
+testStateValues = testCase "state values" $ do
   result <- generateTraces config traceConfig
   case result of
     Right (TracesGenerated (trace : _)) ->
       case traceStates trace of
         initState : _ -> do
           case Map.lookup (T.pack "action_taken") initState of
-            Just (VStr s)
-              | s == T.pack "init" -> putStrLn "  PASS: init action_taken = \"init\""
-              | otherwise -> do
-                  putStrLn $ "FAIL: expected action_taken = \"init\", got " ++ show s
-                  exitFailure
-            Just v -> do
-              putStrLn $ "FAIL: expected VStr for action_taken, got " ++ show v
-              exitFailure
-            Nothing -> do
-              putStrLn "FAIL: action_taken not found in init state"
-              exitFailure
-
+            Just (VStr s) -> s @?= T.pack "init"
+            Just v -> assertFailure $ "expected VStr, got " ++ show v
+            Nothing -> assertFailure "action_taken not found"
           case Map.lookup (T.pack "ticked") initState of
-            Just (VBool False) -> putStrLn "  PASS: init ticked = False"
-            Just v -> do
-              putStrLn $ "FAIL: expected VBool False for ticked, got " ++ show v
-              exitFailure
-            Nothing -> do
-              putStrLn "FAIL: ticked not found in init state"
-              exitFailure
-
+            Just (VBool False) -> pure ()
+            Just v -> assertFailure $ "expected VBool False, got " ++ show v
+            Nothing -> assertFailure "ticked not found"
           case Map.lookup (T.pack "hr") initState of
-            Just (VInt _) -> putStrLn "  PASS: init hr is an integer"
-            Just v -> do
-              putStrLn $ "FAIL: expected VInt for hr, got " ++ show v
-              exitFailure
-            Nothing -> do
-              putStrLn "FAIL: hr not found in init state"
-              exitFailure
-
+            Just (VInt _) -> pure ()
+            Just v -> assertFailure $ "expected VInt, got " ++ show v
+            Nothing -> assertFailure "hr not found"
           case Map.lookup (T.pack "nondet_picks") initState of
-            Just (VRecord _) -> putStrLn "  PASS: init nondet_picks is a record"
-            Just v -> do
-              putStrLn $ "FAIL: expected VRecord for nondet_picks, got " ++ show v
-              exitFailure
-            Nothing -> do
-              putStrLn "FAIL: nondet_picks not found in init state"
-              exitFailure
-
-        [] -> do
-          putStrLn "FAIL: trace has no states"
-          exitFailure
-    _ -> do
-      putStrLn "FAIL: could not get trace for value test"
-      exitFailure
+            Just (VRecord _) -> pure ()
+            Just v -> assertFailure $ "expected VRecord, got " ++ show v
+            Nothing -> assertFailure "nondet_picks not found"
+        [] -> assertFailure "trace has no states"
+    _ -> assertFailure "could not get trace for value test"

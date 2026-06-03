@@ -9,13 +9,14 @@ import Apalache.Types
 import Apalache.Command (validateSpec, generateTraces)
 
 import qualified Data.Text as T
-import System.Exit (exitFailure)
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, assertBool, assertFailure)
 
-spec :: IO ()
-spec = do
-  putStrLn "=== CommandSpec ==="
-  testValidateSpec
-  testGenerateTraces
+spec :: TestTree
+spec = testGroup "CommandSpec"
+  [ testValidateSpec
+  , testGenerateTraces
+  ]
 
 specFile :: FilePath
 specFile = "test/specs/HourClock.tla"
@@ -35,35 +36,19 @@ traceConfig = TraceGenerationConfig
   , numTraces   = 1
   }
 
-testValidateSpec :: IO ()
-testValidateSpec = do
-  putStrLn "[1] validateSpec ..."
+testValidateSpec :: TestTree
+testValidateSpec = testCase "validateSpec" $ do
   result <- validateSpec config 1
   case result of
-    Left err -> do
-      putStrLn $ "FAIL: validateSpec returned error: " ++ show err
-      exitFailure
-    Right SpecValid ->
-      putStrLn "  PASS: spec is valid"
-    Right (SpecInvalid msg) -> do
-      putStrLn $ "FAIL: spec is invalid: " ++ show msg
-      exitFailure
+    Left err -> assertFailure $ "validateSpec returned error: " ++ show err
+    Right SpecValid -> pure ()
+    Right (SpecInvalid msg) -> assertFailure $ "spec is invalid: " ++ show msg
 
-testGenerateTraces :: IO ()
-testGenerateTraces = do
-  putStrLn "[2] generateTraces with TraceComplete ..."
+testGenerateTraces :: TestTree
+testGenerateTraces = testCase "generateTraces with TraceComplete" $ do
   result <- generateTraces config traceConfig
   case result of
-    Left err -> do
-      putStrLn $ "FAIL: generateTraces returned error: " ++ show err
-      exitFailure
-    Right (GenerationError msg) -> do
-      putStrLn $ "FAIL: trace generation error: " ++ show msg
-      exitFailure
-    Right (TracesGenerated traces) -> do
-      if null traces
-        then do
-          putStrLn "FAIL: no traces generated"
-          exitFailure
-        else
-          putStrLn $ "  PASS: generated " ++ show (length traces) ++ " trace(s)"
+    Left err -> assertFailure $ "generateTraces returned error: " ++ show err
+    Right (GenerationError msg) -> assertFailure $ "trace generation error: " ++ show msg
+    Right (TracesGenerated traces) ->
+      assertBool "no traces generated" (not (null traces))
