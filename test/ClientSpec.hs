@@ -1,13 +1,22 @@
 module ClientSpec (spec) where
 
-import Apalache.Types (TraceGenerationConfig (..), ValidateResult (..), Value (..))
+import Apalache.Command (generateTraces)
+import Apalache.Types
+  ( ApalacheConfig (..)
+  , ItfTrace (..)
+  , TraceGenerationConfig (..)
+  , TraceGenerationResult (..)
+  , ValidateResult (..)
+  , Value (..)
+  )
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar
+import Control.Monad (forM_)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Protocol.Client (Client (..), cannedClient, fixedClient, runClient)
+import Protocol.Client (Client (..), cannedClient, fixedClient, hourClockClient, runClient)
 import Protocol.Core
 import Protocol.Format.Json ()
 import Protocol.Transport.Core (recvMsg, sendMsg)
@@ -22,6 +31,7 @@ spec = testGroup "ClientSpec"
   , testCannedClient
   , testFixedClient
   , testSpecInvalid
+  , testHourClock
   ]
 
 awaitResult :: MVar (Either Text ()) -> IO (Either Text ())
@@ -140,3 +150,64 @@ testSpecInvalid = testCase "SpecInvalid returned as error" $ do
   case result of
     Left e -> e @?= T.pack "typecheck failed"
     Right _ -> assertFailure "expected Left, got Right"
+
+hcApalacheConfig :: ApalacheConfig
+hcApalacheConfig = ApalacheConfig
+  { specPath      = "test/specs/HourClock.tla"
+  , initPredicate = Nothing
+  , nextPredicate = Nothing
+  , constInit     = Nothing
+  }
+
+hcTraceConfig :: TraceGenerationConfig
+hcTraceConfig = TraceGenerationConfig
+  { invariant   = T.pack "TraceComplete"
+  , lengthBound = 13
+  , numTraces   = 1
+  }
+
+testHourClock :: TestTree
+testHourClock = testCase "hourClockClient passes verification" $ do
+  traceRes <- generateTraces hcApalacheConfig hcTraceConfig
+  case traceRes of
+    Left err -> assertFailure $ "generateTraces error: " ++ show err
+    Right (GenerationError e) -> assertFailure $ "trace generation error: " ++ show e
+    Right (TracesGenerated []) -> assertFailure "no traces generated"
+    Right (TracesGenerated (trace : _)) -> do
+      let states = traceStates trace
+      assertFailureIf (null states) "trace has no states"
+
+      (cEnd, mEnd) <- newMockTransport
+      client <- hourClockClient cEnd
+      mv <- forkClient client "test/specs/HourClock.tla" hcTraceConfig
+
+      recvMsg mEnd >>= \case
+        Right (Register _ _) -> pure ()
+        other -> assertFailure $ "expected Register, got " ++ show other
+
+      sendMsg mEnd (SpecValidated SpecValid)
+
+      forM_ (zip [0 :: Int ..] states) $ \(i, state) -> do
+        let action = case Map.lookup (T.pack "action_taken") state of
+              Just (VStr a) -> a
+              _             -> T.pack "init"
+        if i == 0
+          then sendMsg mEnd (InitialState action state)
+          else sendMsg mEnd (NextStep action)
+
+        resp <- recvMsg mEnd
+        case resp of
+          Right (ReportState s) -> stripMeta s @?= stripMeta state
+          other -> assertFailure $ "expected ReportState at step " ++ show i ++ ", got " ++ show other
+
+        sendMsg mEnd StepOk
+
+      sendMsg mEnd AllStepsDone
+      result <- awaitResult mv
+      result @?= Right ()
+
+assertFailureIf :: Bool -> String -> IO ()
+assertFailureIf cond msg = if cond then assertFailure msg else pure ()
+
+stripMeta :: Map Text Value -> Map Text Value
+stripMeta = Map.filterWithKey (\k _ -> T.length k == 0 || T.head k /= '#')

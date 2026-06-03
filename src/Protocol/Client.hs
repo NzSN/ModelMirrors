@@ -3,9 +3,10 @@ module Protocol.Client
   , runClient
   , cannedClient
   , fixedClient
+  , hourClockClient
   ) where
 
-import Apalache.Types (TraceGenerationConfig, ValidateResult (..), Value)
+import Apalache.Types (TraceGenerationConfig, ValidateResult (..), Value (..))
 import Data.IORef
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -17,7 +18,7 @@ import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
 
 data Client t = Client
   { clientTransport :: t
-  , clientHandler   :: Text -> IO (Map Text Value)
+  , clientHandler   :: Text -> Map Text Value -> IO (Map Text Value)
   }
 
 runClient :: Transport t => Client t -> FilePath -> TraceGenerationConfig -> IO (Either Text ())
@@ -33,15 +34,15 @@ stepLoop :: Transport t => Client t -> IO (Either Text ())
 stepLoop client = do
   recvMsg (clientTransport client) >>= \case
     Left err                  -> pure (Left (T.pack err))
-    Right (InitialState a _)  -> handleStep client a
-    Right (NextStep a)        -> handleStep client a
+    Right (InitialState a s)  -> handleStep client a s
+    Right (NextStep a)        -> handleStep client a Map.empty
     Right AllStepsDone        -> pure (Right ())
     Right (ProtocolError e)   -> pure (Left e)
     Right _                   -> pure (Left (T.pack "Unexpected message in step loop"))
 
-handleStep :: Transport t => Client t -> Text -> IO (Either Text ())
-handleStep client action = do
-  actual <- clientHandler client action
+handleStep :: Transport t => Client t -> Text -> Map Text Value -> IO (Either Text ())
+handleStep client action prevState = do
+  actual <- clientHandler client action prevState
   sendMsg (clientTransport client) (ReportState actual)
   recvMsg (clientTransport client) >>= \case
     Left err         -> pure (Left (T.pack err))
@@ -53,11 +54,47 @@ handleStep client action = do
 cannedClient :: t -> [Map Text Value] -> IO (Client t)
 cannedClient t responses = do
   ref <- newIORef responses
-  pure $ Client t $ \_ -> do
+  pure $ Client t $ \_ _ -> do
     rs <- readIORef ref
     case rs of
       []     -> pure Map.empty
       r : rest -> writeIORef ref rest >> pure r
 
 fixedClient :: t -> Map Text Value -> Client t
-fixedClient t state = Client t (const (pure state))
+fixedClient t state = Client t (\_ _ -> pure state)
+
+hourClockClient :: t -> IO (Client t)
+hourClockClient t = do
+  ref <- newIORef Map.empty
+  pure $ Client t $ \action prevState -> do
+    if action == T.pack "init"
+      then do
+        writeIORef ref prevState
+        pure prevState
+      else if action == T.pack "tick"
+        then do
+          current <- readIORef ref
+          let next = hcTick current
+          writeIORef ref next
+          pure next
+        else readIORef ref
+
+hcTick :: Map Text Value -> Map Text Value
+hcTick state = Map.fromList
+  [ (T.pack "hr", newHr)
+  , (T.pack "latest_hr", VInt oldHrVal)
+  , (T.pack "ticked", VBool True)
+  , (T.pack "action_taken", VStr (T.pack "tick"))
+  , (T.pack "nondet_picks", picks)
+  , (T.pack "step_count", VInt (oldStep + 1))
+  ]
+  where
+    oldHrVal = getInt (T.pack "hr") state
+    newHr = VInt (if oldHrVal /= 12 then oldHrVal + 1 else 1)
+    oldStep = getInt (T.pack "step_count") state
+    picks = Map.findWithDefault VNull (T.pack "nondet_picks") state
+
+getInt :: Text -> Map Text Value -> Integer
+getInt k m = case Map.lookup k m of
+  Just (VInt n) -> n
+  _             -> 0
