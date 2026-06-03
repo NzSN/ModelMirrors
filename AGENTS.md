@@ -2,16 +2,24 @@
 
 ## Build & Test
 
+### Bazel (primary)
+```sh
+bazel build //...                        # build all targets
+bazel test //test:ModelMirros-test       # run tests
+```
+
+### Cabal (for IDE / Hackage)
 ```sh
 cabal build all    # build library + executable
 cabal test all     # run tests
 ```
 
-There is no lint, format, typecheck, or CI config. Build with `-Wall` (set in `.cabal`). To make warnings fatal: `cabal build --ghc-options=-Werror`.
+There is no lint, format, typecheck, or CI config. Build with `-Wall` (set in `.cabal` and Bazel BUILD files). To make warnings fatal: `cabal build --ghc-options=-Werror`.
 
 ## Prerequisites
 
-- GHC 9.12+ (`base ^>= 4.21.0.0` in `ModelMirros.cabal`)
+- Bazel 7.4.0
+- GHC 9.10+ (bindist GHC 9.10.1 managed by Bazel; cabal uses local GHC)
 - `apalache-mc` on `PATH` (tests shell out to it)
 
 ## Package Structure (single package)
