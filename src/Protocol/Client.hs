@@ -35,7 +35,7 @@ stepLoop client = do
   recvMsg (clientTransport client) >>= \case
     Left err                  -> pure (Left (T.pack err))
     Right (InitialState a s)  -> handleStep client a s
-    Right (NextStep a)        -> handleStep client a Map.empty
+    Right (NextStep a p)        -> handleStep client a p
     Right AllStepsDone        -> pure (Right ())
     Right (ProtocolError e)   -> pure (Left e)
     Right _                   -> pure (Left (T.pack "Unexpected message in step loop"))

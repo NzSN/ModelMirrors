@@ -1,6 +1,6 @@
 module Apalache.Types where
 
-import Data.Aeson (FromJSON, ToJSON, withObject, (.:), (.=), object)
+import Data.Aeson (FromJSON, ToJSON, withObject, (.:), (.:?), (.=), (.!=), object)
 import qualified Data.Aeson as A
 import Data.Aeson.Key (fromString, fromText, toText)
 import qualified Data.Aeson.KeyMap as KM
@@ -59,9 +59,16 @@ data TraceGenerationResult
 newtype ApalacheError = ApalacheError { unApalacheError :: Text }
   deriving (Show, Eq)
 
+data TraceState = TraceState
+  { actionTake :: !Text
+  , parameters :: !(Map Text Value)
+  , stateVars  :: !(Map Text Value)
+  } deriving (Show, Eq)
+
 data ItfTrace = ItfTrace
   { traceVars   :: ![Text]
-  , traceStates :: ![Map Text Value]
+  , paramVars   :: ![Text]
+  , traceStates :: ![TraceState]
   } deriving (Show, Eq)
 
 data Value
@@ -74,15 +81,29 @@ data Value
   | VNull
   deriving (Show, Eq)
 
+instance ToJSON TraceState where
+  toJSON ts = A.toJSON
+    $ Map.insert (T.pack "action_taken") (VStr (actionTake ts))
+    $ Map.union (parameters ts) (stateVars ts)
+
 instance FromJSON ItfTrace where
-  parseJSON = withObject "ItfTrace" $ \o ->
-    ItfTrace
-      <$> o .: fromString "vars"
-      <*> o .: fromString "states"
+  parseJSON = withObject "ItfTrace" $ \o -> do
+    vars   <- o .: fromString "vars"
+    pvs    <- o .:? fromString "param_vars" .!= ([] :: [Text])
+    states <- o .: fromString "states"
+    let split m = TraceState
+          { actionTake = case Map.lookup (T.pack "action_taken") m of
+              Just (VStr a) -> a
+              _             -> T.empty
+          , parameters = Map.filterWithKey (\k _ -> k `elem` pvs) m
+          , stateVars  = Map.filterWithKey (\k _ -> k /= T.pack "action_taken" && k `notElem` pvs) m
+          }
+    pure $ ItfTrace vars pvs (map split states)
 
 instance ToJSON ItfTrace where
   toJSON t = object
     [ fromString "vars" .= traceVars t
+    , fromString "param_vars" .= paramVars t
     , fromString "states" .= traceStates t
     ]
 

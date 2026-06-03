@@ -5,6 +5,7 @@ import Apalache.Types
   , TraceGenerationConfig (..)
   , TraceGenerationResult (..)
   , ItfTrace (..)
+  , TraceState (..)
   , Value (..)
   )
 import Apalache.Command (generateTraces)
@@ -81,19 +82,17 @@ testStateValues = testCase "state values" $ do
     Right (TracesGenerated (trace : _)) ->
       case traceStates trace of
         initState : _ -> do
-          case Map.lookup (T.pack "action_taken") initState of
-            Just (VStr s) -> s @?= T.pack "init"
-            Just v -> assertFailure $ "expected VStr, got " ++ show v
-            Nothing -> assertFailure "action_taken not found"
-          case Map.lookup (T.pack "ticked") initState of
+          actionTake initState @?= T.pack "init"
+          let vars = stateVars initState
+          case Map.lookup (T.pack "ticked") vars of
             Just (VBool False) -> pure ()
             Just v -> assertFailure $ "expected VBool False, got " ++ show v
             Nothing -> assertFailure "ticked not found"
-          case Map.lookup (T.pack "hr") initState of
+          case Map.lookup (T.pack "hr") vars of
             Just (VInt _) -> pure ()
             Just v -> assertFailure $ "expected VInt, got " ++ show v
             Nothing -> assertFailure "hr not found"
-          case Map.lookup (T.pack "nondet_picks") initState of
+          case Map.lookup (T.pack "nondet_picks") vars of
             Just (VRecord _) -> pure ()
             Just v -> assertFailure $ "expected VRecord, got " ++ show v
             Nothing -> assertFailure "nondet_picks not found"

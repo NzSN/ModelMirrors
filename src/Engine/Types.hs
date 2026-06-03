@@ -5,13 +5,15 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 
 data Step = Step
-  { stepIdx  :: !Int
-  , stepVars :: !(Map Text Value)
+  { stepIdx    :: !Int
+  , stepAct    :: !Text
+  , stepParams :: !(Map Text Value)
+  , stepVars   :: !(Map Text Value)
   } deriving (Show, Eq)
 
 data StepCommand
   = CmdInitial !Text !(Map Text Value)
-  | CmdNextStep !Text
+  | CmdNextStep !Text !(Map Text Value)
   deriving (Show, Eq)
 
 data VarDiff

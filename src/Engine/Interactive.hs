@@ -23,4 +23,4 @@ stdioJSONDriver = StateDriver $ \cmd -> do
 
 commandToMessage :: StepCommand -> MirrorMessage
 commandToMessage (CmdInitial act state) = InitialState act state
-commandToMessage (CmdNextStep act) = NextStep act
+commandToMessage (CmdNextStep act params) = NextStep act params

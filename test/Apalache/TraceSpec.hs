@@ -5,6 +5,7 @@ import Apalache.Types
   , TraceGenerationConfig (..)
   , TraceGenerationResult (..)
   , ItfTrace (..)
+  , TraceState (..)
   )
 import Apalache.Command (generateTraces)
 
@@ -44,6 +45,6 @@ testTraceContents = testCase "trace contents" $ do
       assertBool "no variables in trace" (not (null (traceVars trace)))
       case traceStates trace of
         initState : _ ->
-          assertBool "init state missing hr" (Map.member (T.pack "hr") initState)
+          assertBool "init state missing hr" (Map.member (T.pack "hr") (stateVars initState))
         [] -> assertFailure "trace has no states"
     _ -> assertFailure "could not get trace for contents test"

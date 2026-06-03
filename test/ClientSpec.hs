@@ -4,6 +4,7 @@ import Apalache.Command (generateTraces)
 import Apalache.Types
   ( ApalacheConfig (..)
   , ItfTrace (..)
+  , TraceState (..)
   , TraceGenerationConfig (..)
   , TraceGenerationResult (..)
   , ValidateResult (..)
@@ -66,7 +67,7 @@ testCorrectClientSucceeds = testCase "correct client succeeds" $ do
     Right (ReportState s) -> s @?= x0
     other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
-  sendMsg mEnd (NextStep (T.pack "Advance"))
+  sendMsg mEnd (NextStep (T.pack "Advance") Map.empty)
   recvMsg mEnd >>= \case
     Right (ReportState s) -> s @?= x1
     other -> assertFailure $ "expected ReportState, got " ++ show other
@@ -103,12 +104,12 @@ testCannedClient = testCase "cannedClient responses in order" $ do
     Right (ReportState s) -> s @?= x0
     other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
-  sendMsg mEnd (NextStep (T.pack "Advance"))
+  sendMsg mEnd (NextStep (T.pack "Advance") Map.empty)
   recvMsg mEnd >>= \case
     Right (ReportState s) -> s @?= x1
     other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
-  sendMsg mEnd (NextStep (T.pack "Advance"))
+  sendMsg mEnd (NextStep (T.pack "Advance") Map.empty)
   recvMsg mEnd >>= \case
     Right (ReportState s) -> s @?= Map.singleton (T.pack "x") (VInt 2)
     other -> assertFailure $ "expected ReportState, got " ++ show other
@@ -130,7 +131,7 @@ testFixedClient = testCase "fixedClient always returns same state" $ do
     Right (ReportState s) -> s @?= fixedState
     other -> assertFailure $ "expected ReportState, got " ++ show other
   sendMsg mEnd StepOk
-  sendMsg mEnd (NextStep (T.pack "Advance"))
+  sendMsg mEnd (NextStep (T.pack "Advance") Map.empty)
   recvMsg mEnd >>= \case
     Right (ReportState s) -> s @?= fixedState
     other -> assertFailure $ "expected ReportState, got " ++ show other
@@ -187,13 +188,12 @@ testHourClock = testCase "hourClockClient passes verification" $ do
 
       sendMsg mEnd (SpecValidated SpecValid)
 
-      forM_ (zip [0 :: Int ..] states) $ \(i, state) -> do
-        let action = case Map.lookup (T.pack "action_taken") state of
-              Just (VStr a) -> a
-              _             -> T.pack "init"
+      forM_ (zip [0 :: Int ..] states) $ \(i, ts) -> do
+        let action = actionTake ts
+            state  = Map.union (parameters ts) (stateVars ts)
         if i == 0
           then sendMsg mEnd (InitialState action state)
-          else sendMsg mEnd (NextStep action)
+          else sendMsg mEnd (NextStep action Map.empty)
 
         resp <- recvMsg mEnd
         case resp of
@@ -210,4 +210,4 @@ assertFailureIf :: Bool -> String -> IO ()
 assertFailureIf cond msg = if cond then assertFailure msg else pure ()
 
 stripMeta :: Map Text Value -> Map Text Value
-stripMeta = Map.filterWithKey (\k _ -> T.length k == 0 || T.head k /= '#')
+stripMeta = Map.filterWithKey (\k _ -> T.length k == 0 || (T.head k /= '#' && k /= T.pack "action_taken"))

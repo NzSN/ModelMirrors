@@ -1,6 +1,6 @@
 module Engine.Core where
 
-import Apalache.Types (ItfTrace (..), Value)
+import Apalache.Types (ItfTrace (..), TraceState (..), Value (..))
 import Engine.Types (Step (..), StateDiff (..), VarDiff (..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -8,7 +8,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 traceSteps :: ItfTrace -> [Step]
-traceSteps trace = zipWith (\i m -> Step i m) [0..] (traceStates trace)
+traceSteps trace = zipWith toStep [0..] (traceStates trace)
+  where
+    toStep i s = Step i (actionTake s) (parameters s)
+      (Map.insert (T.pack "action_taken") (VStr (actionTake s))
+      $ Map.union (parameters s) (stateVars s))
 
 diffState :: Map Text Value -> Map Text Value -> StateDiff
 diffState expected actual =
@@ -29,4 +33,4 @@ diffState expected actual =
        _  -> StateMismatch expected' actual' diffs
 
 isMetaKey :: Text -> Bool
-isMetaKey k = T.length k > 0 && T.head k == '#'
+isMetaKey k = (T.length k > 0 && T.head k == '#') || k == T.pack "action_taken"

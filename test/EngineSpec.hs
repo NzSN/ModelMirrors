@@ -1,6 +1,6 @@
 module EngineSpec (spec) where
 
-import Apalache.Types (ItfTrace (..), Value (..))
+import Apalache.Types (ItfTrace (..), TraceState (..), Value (..))
 import Engine.Core (traceSteps, diffState)
 import Engine.Replay (EngineM (..), StateDriver (..))
 import Engine.Types (Step (..), StepCommand (..), StateDiff (..), VarDiff (..))
@@ -35,26 +35,33 @@ spec = testGroup "EngineSpec"
 
 testTraceStepsEmpty :: TestTree
 testTraceStepsEmpty = testCase "traceSteps empty" $ do
-  let trace = ItfTrace [] []
+  let trace = ItfTrace [] [] []
   assertBool "empty trace yields empty list" (null (traceSteps trace))
 
 testTraceStepsOne :: TestTree
 testTraceStepsOne = testCase "traceSteps single state" $ do
-  let s0 = Map.singleton (T.pack "x") (VInt 1)
-      trace = ItfTrace [T.pack "x"] [s0]
+  let s0 = TraceState (T.pack "init") Map.empty (Map.singleton (T.pack "x") (VInt 1))
+      trace = ItfTrace [T.pack "x"] [] [s0]
   case traceSteps trace of
-    [Step 0 m] -> m @?= s0
-    other      -> assertFailure $ "expected one step, got " ++ show (length other)
+    [Step 0 act params m] -> do
+      act @?= T.pack "init"
+      params @?= Map.empty
+      m @?= Map.fromList [(T.pack "action_taken", VStr (T.pack "init")), (T.pack "x", VInt 1)]
+    other -> assertFailure $ "expected one step, got " ++ show (length other)
 
 testTraceStepsTwo :: TestTree
 testTraceStepsTwo = testCase "traceSteps two states" $ do
-  let s0 = Map.singleton (T.pack "x") (VInt 1)
-      s1 = Map.singleton (T.pack "x") (VInt 2)
-      trace = ItfTrace [T.pack "x"] [s0, s1]
+  let s0 = TraceState (T.pack "init") Map.empty (Map.singleton (T.pack "x") (VInt 1))
+      s1 = TraceState (T.pack "advance") Map.empty (Map.singleton (T.pack "x") (VInt 2))
+      trace = ItfTrace [T.pack "x"] [] [s0, s1]
   case traceSteps trace of
-    [Step 0 a, Step 1 b] -> do
-      a @?= s0
-      b @?= s1
+    [Step 0 a0 p0 m0, Step 1 a1 p1 m1] -> do
+      a0 @?= T.pack "init"
+      p0 @?= Map.empty
+      m0 @?= Map.fromList [(T.pack "action_taken", VStr (T.pack "init")), (T.pack "x", VInt 1)]
+      a1 @?= T.pack "advance"
+      p1 @?= Map.empty
+      m1 @?= Map.fromList [(T.pack "action_taken", VStr (T.pack "advance")), (T.pack "x", VInt 2)]
     other -> assertFailure $ "expected two steps, got " ++ show (length other)
 
 ----------------------------------------------------------------------
@@ -102,26 +109,26 @@ testDiffMixed = testCase "diffState mixed differences" $ do
 
 testReplayEmpty :: TestTree
 testReplayEmpty = testCase "replayTrace empty" $ do
-  let trace = ItfTrace [] []
+  let trace = ItfTrace [] [] []
       report = StateDriver (\_ -> pure (Map.empty :: Map Text Value))
       result = runIdentity (replayTrace trace report)
   assertBool "empty trace yields empty list" (null result)
 
 testReplayAllMatch :: TestTree
 testReplayAllMatch = testCase "replayTrace all match" $ do
-  let s0 = Map.singleton (T.pack "x") (VInt 1)
-      s1 = Map.singleton (T.pack "x") (VInt 2)
-      trace = ItfTrace [T.pack "x"] [s0, s1]
+  let s0 = TraceState (T.pack "init") Map.empty (Map.singleton (T.pack "x") (VInt 1))
+      s1 = TraceState (T.pack "advance") Map.empty (Map.singleton (T.pack "x") (VInt 2))
+      trace = ItfTrace [T.pack "x"] [] [s0, s1]
       report = StateDriver $ \cmd -> pure $ case cmd of
-        CmdInitial _ _ -> s0
-        CmdNextStep _ -> s1
+        CmdInitial _ _ -> (Map.singleton (T.pack "x") (VInt 1) :: Map Text Value)
+        CmdNextStep _ _ -> Map.singleton (T.pack "x") (VInt 2)
   runIdentity (replayTrace trace report) @?= [StatesMatch, StatesMatch]
 
 testReplayFirstMismatch :: TestTree
 testReplayFirstMismatch = testCase "replayTrace first mismatch" $ do
-  let s0 = Map.singleton (T.pack "x") (VInt 1)
-      s1 = Map.singleton (T.pack "x") (VInt 2)
-      trace = ItfTrace [T.pack "x"] [s0, s1]
+  let s0 = TraceState (T.pack "init") Map.empty (Map.singleton (T.pack "x") (VInt 1))
+      s1 = TraceState (T.pack "advance") Map.empty (Map.singleton (T.pack "x") (VInt 2))
+      trace = ItfTrace [T.pack "x"] [] [s0, s1]
       report = StateDriver (\_ -> pure (Map.singleton (T.pack "x") (VInt 999)))
   case runIdentity (replayTrace trace report) of
     [StateMismatch{}] -> pure ()
@@ -129,12 +136,12 @@ testReplayFirstMismatch = testCase "replayTrace first mismatch" $ do
 
 testReplaySecondMismatch :: TestTree
 testReplaySecondMismatch = testCase "replayTrace second mismatch" $ do
-  let s0 = Map.singleton (T.pack "x") (VInt 1)
-      s1 = Map.singleton (T.pack "x") (VInt 2)
-      trace = ItfTrace [T.pack "x"] [s0, s1]
+  let s0 = TraceState (T.pack "init") Map.empty (Map.singleton (T.pack "x") (VInt 1))
+      s1 = TraceState (T.pack "advance") Map.empty (Map.singleton (T.pack "x") (VInt 2))
+      trace = ItfTrace [T.pack "x"] [] [s0, s1]
       report = StateDriver $ \case
         CmdInitial _ _ -> pure (Map.singleton (T.pack "x") (VInt 1))
-        CmdNextStep _ -> pure (Map.singleton (T.pack "x") (VInt 999))
+        CmdNextStep _ _ -> pure (Map.singleton (T.pack "x") (VInt 999))
   case runIdentity (replayTrace trace report) of
     [StatesMatch, StateMismatch{}] -> pure ()
     other -> assertFailure $ "expected [StatesMatch, StateMismatch], got " ++ show other

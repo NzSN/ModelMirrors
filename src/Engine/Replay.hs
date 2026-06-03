@@ -2,15 +2,12 @@ module Engine.Replay
   ( EngineM (..)
   , StateDriver (..)
   , StateDiff (..)
-  , stepAction
   ) where
 
-import Apalache.Types (ItfTrace (..), Value (..))
+import Apalache.Types (ItfTrace (..), Value)
 import Data.Functor.Identity (Identity)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import Data.Text (Text)
-import qualified Data.Text as T
 import Engine.Core (diffState, traceSteps)
 import Engine.Types (Step (..), StepCommand (..), StateDiff (..))
 
@@ -28,10 +25,10 @@ class Monad m => EngineM m where
     where
       go [] = pure []
       go (step : steps) = do
-        let action = stepAction step
+        let action = stepAct step
             cmd = if stepIdx step == 0
                   then CmdInitial action (stepVars step)
-                  else CmdNextStep action
+                  else CmdNextStep action (stepParams step)
         actual <- report cmd
         let diff = diffState (stepVars step) actual
         onStepResult diff
@@ -40,8 +37,3 @@ class Monad m => EngineM m where
           StateMismatch{} -> pure [diff]
 
 instance EngineM Identity
-
-stepAction :: Step -> Text
-stepAction step = case Map.lookup (T.pack "action_taken") (stepVars step) of
-  Just (VStr a) -> a
-  _             -> mempty
