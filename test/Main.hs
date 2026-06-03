@@ -5,6 +5,7 @@ import qualified Apalache.TraceSpec as TraceSpec
 import qualified Apalache.TypesSpec as TypesSpec
 import qualified ClientSpec
 import qualified EngineSpec
+import qualified MainSpec
 
 main :: IO ()
 main = do
@@ -13,3 +14,4 @@ main = do
   CommandSpec.spec
   TraceSpec.spec
   TypesSpec.spec
+  MainSpec.spec

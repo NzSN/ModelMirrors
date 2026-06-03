@@ -1,4 +1,9 @@
-module Engine.Replay (EngineM (..), StateDriver (..)) where
+module Engine.Replay
+  ( EngineM (..)
+  , StateDriver (..)
+  , StateDiff (..)
+  , stepAction
+  ) where
 
 import Apalache.Types (ItfTrace (..), Value (..))
 import Data.Functor.Identity (Identity)
@@ -15,6 +20,10 @@ newtype StateDriver m = StateDriver
 
 class Monad m => EngineM m where
   replayTrace :: ItfTrace -> StateDriver m -> m [StateDiff]
+
+  onStepResult :: StateDiff -> m ()
+  onStepResult _ = pure ()
+
   replayTrace trace (StateDriver report) = go (traceSteps trace)
     where
       go [] = pure []
@@ -25,6 +34,7 @@ class Monad m => EngineM m where
                   else CmdNextStep action
         actual <- report cmd
         let diff = diffState (stepVars step) actual
+        onStepResult diff
         case diff of
           StatesMatch -> (diff :) <$> go steps
           StateMismatch{} -> pure [diff]
