@@ -9,8 +9,8 @@ bazel_dep(name = "rules_haskell", version = "1.0")
 # Use master branches which have the get_cpu_value fix.
 git_override(
     module_name = "rules_haskell",
-    remote = "https://github.com/tweag/rules_haskell",
-    commit = "b459268dee8e73244babdaa84c4feb7796e923df",
+    remote = "https://github.com/NzSN/rules_haskell",
+    commit = "932d7545df965cc9f62a181a948df73fa08fdaf8",
 )
 
 git_override(
@@ -20,6 +20,9 @@ git_override(
 )
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.5")
+bazel_dep(name = "rules_nodejs", version = "6.7.4")
+bazel_dep(name = "rules_python", version = "0.37.2")
 
 rules_haskell_dependencies = use_extension(
     "@rules_haskell//extensions:rules_haskell_dependencies.bzl",
