@@ -255,7 +255,7 @@ git commit -m "chore: add stackage_snapshot.yaml for GHC 9.10.3 package resoluti
 load("@rules_haskell//haskell:defs.bzl", "haskell_library")
 
 haskell_library(
-    name = "ModelMirros",
+    name = "ModelMirrors",
     srcs = glob(["**/*.hs"]),
     compiler_flags = ["-Wall"],
     default_language = "GHC2024",
@@ -274,7 +274,7 @@ haskell_library(
 
 - [ ] **Step 2: Test build**
 
-Run: `bazel build //src:ModelMirros`
+Run: `bazel build //src:ModelMirrors`
 
 If dependency resolution fails (missing packages from snapshot), adjust `stackage_snapshot.yaml` or the `stack_snapshot.package()` calls in `MODULE.bazel`.
 
@@ -300,12 +300,12 @@ git commit -m "chore: add src/BUILD.bazel — haskell_library with 15 modules"
 load("@rules_haskell//haskell:defs.bzl", "haskell_binary")
 
 haskell_binary(
-    name = "ModelMirros",
+    name = "ModelMirrors",
     srcs = ["Main.hs"],
     compiler_flags = ["-Wall"],
     default_language = "GHC2024",
     deps = [
-        "//src:ModelMirros",
+        "//src:ModelMirrors",
         "@stackage//:base",
         "@stackage//:containers",
         "@stackage//:text",
@@ -315,7 +315,7 @@ haskell_binary(
 
 - [ ] **Step 2: Test build**
 
-Run: `bazel build //app:ModelMirros`
+Run: `bazel build //app:ModelMirrors`
 Expected: executable links successfully.
 
 - [ ] **Step 3: Commit**
@@ -389,7 +389,7 @@ git commit -m "chore: add apalache-mc Bazel repository rule"
 load("@rules_haskell//haskell:defs.bzl", "haskell_test")
 
 haskell_test(
-    name = "ModelMirros-test",
+    name = "ModelMirrors-test",
     srcs = glob(
         ["**/*.hs"],
         exclude = ["specs/**"],
@@ -398,7 +398,7 @@ haskell_test(
     data = glob(["specs/*.tla"]),
     default_language = "GHC2024",
     deps = [
-        "//src:ModelMirros",
+        "//src:ModelMirrors",
         "@apalache_mc//:apalache-mc",
         "@stackage//:base",
         "@stackage//:bytestring",
@@ -433,7 +433,7 @@ For now, try Option A first. If tests fail due to missing files, implement Optio
 
 - [ ] **Step 3: Test**
 
-Run: `bazel test //test:ModelMirros-test`
+Run: `bazel test //test:ModelMirrors-test`
 
 Expected: tests compile and run. Some may fail if `apalache-mc` path resolution or TLA+ file paths are wrong — iterate.
 
@@ -455,7 +455,7 @@ Expected: all targets build successfully.
 
 - [ ] **Step 2: Run tests**
 
-Run: `bazel test //test:ModelMirros-test`
+Run: `bazel test //test:ModelMirrors-test`
 Expected: all 28 tests pass (those requiring `apalache-mc` may take 30+ seconds).
 
 - [ ] **Step 3: Verify cabal still works**
@@ -495,7 +495,7 @@ Replace the Build & Test section:
 ### Bazel (primary)
 ```sh
 bazel build //...                            # build all targets
-bazel test //test:ModelMirros-test           # run tests
+bazel test //test:ModelMirrors-test           # run tests
 ```
 
 ### Cabal (for IDE / Hackage)

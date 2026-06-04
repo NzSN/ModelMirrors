@@ -9,7 +9,7 @@ import qualified MainSpec
 import Test.Tasty (defaultMain, testGroup)
 
 main :: IO ()
-main = defaultMain $ testGroup "ModelMirros"
+main = defaultMain $ testGroup "ModelMirrors"
   [ ClientSpec.spec
   , EngineSpec.spec
   , CommandSpec.spec

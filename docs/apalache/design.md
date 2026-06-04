@@ -216,7 +216,7 @@ instance FromJSON Value where
 
 ## Dependencies
 
-The following dependencies must be added to `ModelMirros.cabal` in the library's `build-depends`:
+The following dependencies must be added to `ModelMirrors.cabal` in the library's `build-depends`:
 
 ```cabal
 build-depends:

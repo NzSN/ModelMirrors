@@ -17,7 +17,7 @@ src/Engine/
 src/Engine.hs  -- updated umbrella: re-exports Engine.Handle too
 ```
 
-`Engine.Handle` is added to `exposed-modules` in `ModelMirros.cabal`.
+`Engine.Handle` is added to `exposed-modules` in `ModelMirrors.cabal`.
 
 No new cabal dependencies.
 

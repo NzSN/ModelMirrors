@@ -5,7 +5,7 @@
 ### Bazel (primary)
 ```sh
 bazel build //...                        # build all targets
-bazel test //test:ModelMirros-test       # run tests
+bazel test //test:ModelMirrors-test       # run tests
 ```
 
 ### Cabal (for IDE / Hackage)
@@ -24,7 +24,7 @@ There is no lint, format, typecheck, or CI config. Build with `-Wall` (set in `.
 
 ## Package Structure (single package)
 
-- Package name: **`ModelMirros`** (missing 'r' — intentional typo in `ModelMirros.cabal`)
+- Package name: **`ModelMirrors`**
 - Library (19 exposed modules across 4 namespaces):
   - `Apalache.{Core,Types,Command,Trace}` — apalache-mc wrapper
   - `Engine`, `Engine.{Core,Replay,Interactive,Types}` — trace replay engine

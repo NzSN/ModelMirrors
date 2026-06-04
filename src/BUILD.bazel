@@ -1,7 +1,7 @@
 load("@rules_haskell//haskell:defs.bzl", "haskell_library")
 
 haskell_library(
-    name = "ModelMirros",
+    name = "ModelMirrors",
     srcs = glob(["**/*.hs"]),
     ghcopts = ["-Wall", "-XGHC2024"],
     visibility = ["//visibility:public"],

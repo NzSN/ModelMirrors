@@ -16,19 +16,19 @@ findMirrorBinary :: IO FilePath
 findMirrorBinary = do
   raw <- lines <$> readProcess "find"
     [ "dist-newstyle/build"
-    , "-name", "ModelMirros"
+    , "-name", "ModelMirrors"
     , "-type", "f"
     , "-executable"
     ] ""
   let candidates = filter
-        (\p -> "/x/ModelMirros/build/ModelMirros/ModelMirros" `isSuffixOf` p)
+        (\p -> "/x/ModelMirrors/build/ModelMirrors/ModelMirrors" `isSuffixOf` p)
         raw
   case candidates of
     (p : _) -> do
       exists <- doesFileExist p
       if exists then pure p
       else error $ "binary listed by find but not accessible: " ++ p
-    _ -> error $ "ModelMirros binary not found. Found: " ++ show raw
+    _ -> error $ "ModelMirrors binary not found. Found: " ++ show raw
 
 findMirrorBinaryOrSkip :: IO (Maybe FilePath)
 findMirrorBinaryOrSkip = do

@@ -39,7 +39,7 @@ class Monad m => EngineM m where
           StateMismatch{} -> pure [diff]
 ```
 
-Add `Engine.Handle` to `exposed-modules` in `ModelMirros.cabal`, alphabetical among `Engine*` entries.
+Add `Engine.Handle` to `exposed-modules` in `ModelMirrors.cabal`, alphabetical among `Engine*` entries.
 
 - [ ] **Step 2: Build to verify**
 
@@ -49,7 +49,7 @@ Expected: Build succeeds with no warnings.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/Engine/Handle.hs ModelMirros.cabal
+git add src/Engine/Handle.hs ModelMirrors.cabal
 git commit -m "feat: add Engine.Handle with EngineM typeclass"
 ```
 

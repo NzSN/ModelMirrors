@@ -142,7 +142,7 @@ git commit -m "feat: add Engine umbrella re-export module"
 ### Task 4: Register Modules in Cabal
 
 **Files:**
-- Modify: `ModelMirros.cabal:65-69`
+- Modify: `ModelMirrors.cabal:65-69`
 
 - [ ] **Step 1: Add Engine modules to `exposed-modules`**
 
@@ -171,7 +171,7 @@ Expected: Build succeeds with no warnings.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add ModelMirros.cabal
+git add ModelMirrors.cabal
 git commit -m "feat: expose Engine modules in cabal file"
 ```
 
@@ -359,7 +359,7 @@ git commit -m "test: add pure unit tests for Engine"
 
 **Files:**
 - Modify: `test/Main.hs`
-- Modify: `ModelMirros.cabal:130-133`
+- Modify: `ModelMirrors.cabal:130-133`
 
 - [ ] **Step 1: Add `EngineSpec` import and call in `test/Main.hs`**
 
@@ -381,7 +381,7 @@ main = do
   TypesSpec.spec
 ```
 
-- [ ] **Step 2: Add `EngineSpec` to `other-modules` in `ModelMirros.cabal`**
+- [ ] **Step 2: Add `EngineSpec` to `other-modules` in `ModelMirrors.cabal`**
 
 Replace the `other-modules:` block (lines 130-133) with:
 
@@ -408,7 +408,7 @@ NOTE: EngineSpec tests are pure and will run fast. The existing Apalache tests w
 - [ ] **Step 5: Commit**
 
 ```bash
-git add test/Main.hs ModelMirros.cabal
+git add test/Main.hs ModelMirrors.cabal
 git commit -m "test: wire EngineSpec into test suite"
 ```
 

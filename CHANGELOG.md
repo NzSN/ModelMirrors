@@ -1,4 +1,4 @@
-# Revision history for ModelMirros
+# Revision history for ModelMirrors
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

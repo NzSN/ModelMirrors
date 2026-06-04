@@ -1,7 +1,7 @@
 load("@rules_haskell//haskell:defs.bzl", "haskell_test")
 
 haskell_test(
-    name = "ModelMirros-test",
+    name = "ModelMirrors-test",
     srcs = glob(
         ["**/*.hs"],
         exclude = ["specs/**"],
@@ -9,7 +9,7 @@ haskell_test(
     ghcopts = ["-Wall", "-XGHC2024"],
     data = glob(["specs/*.tla"]),
     deps = [
-        "//src:ModelMirros",
+        "//src:ModelMirrors",
         "//:base",
         "@apalache_mc//:apalache-mc",
         "@stackage//:bytestring",

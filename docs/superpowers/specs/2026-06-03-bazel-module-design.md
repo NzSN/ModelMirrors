@@ -45,7 +45,7 @@ No existing files are modified.
 
 ## src/BUILD.bazel
 
-- `haskell_library(name = "ModelMirros")`
+- `haskell_library(name = "ModelMirrors")`
 - Exposes all 15 modules (matches cabal `exposed-modules`)
 - Language: `GHC2024`
 - Compiler flags: `-Wall`
@@ -53,16 +53,16 @@ No existing files are modified.
 
 ## app/BUILD.bazel
 
-- `haskell_binary(name = "ModelMirros")`
+- `haskell_binary(name = "ModelMirrors")`
 - Main: `Main.hs`
-- Deps: `//src:ModelMirros`, containers, text
+- Deps: `//src:ModelMirrors`, containers, text
 
 ## test/BUILD.bazel
 
-- `haskell_test(name = "ModelMirros-test")`
+- `haskell_test(name = "ModelMirrors-test")`
 - Main: `Main.hs`
 - Other modules: CommandSpec, TraceSpec, TypesSpec, ClientSpec, EngineSpec, MainSpec
-- Deps: `//src:ModelMirros`, bytestring, containers, directory, process, tasty, tasty-hunit, text
+- Deps: `//src:ModelMirrors`, bytestring, containers, directory, process, tasty, tasty-hunit, text
 - Data deps: `test/specs/*.tla` via `data` attribute, resolved via `$(rootpath ...)` runfile APIs
 - apalache-mc toolchain provides `apalache-mc` on PATH during test execution
 
@@ -75,9 +75,9 @@ No existing files are modified.
 ## Build Targets
 
 ```
-bazel build //src:ModelMirros       # library
-bazel build //app:ModelMirros       # executable
-bazel test  //test:ModelMirros-test # test suite
+bazel build //src:ModelMirrors       # library
+bazel build //app:ModelMirrors       # executable
+bazel test  //test:ModelMirrors-test # test suite
 ```
 
 ## .bazelrc

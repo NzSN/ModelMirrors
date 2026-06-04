@@ -1,11 +1,11 @@
 load("@rules_haskell//haskell:defs.bzl", "haskell_binary")
 
 haskell_binary(
-    name = "ModelMirros",
+    name = "ModelMirrors",
     srcs = ["Main.hs"],
     ghcopts = ["-Wall", "-XGHC2024"],
     deps = [
-        "//src:ModelMirros",
+        "//src:ModelMirrors",
         "//:base",
         "@stackage//:containers",
         "@stackage//:text",

@@ -80,4 +80,4 @@ and other language servers.
 - Each JSON message is written as a single line to stdout (mirror → client) or stdin (client → mirror).
 - No port negotiation, no socket setup, no extra dependencies.
 
-Both modules added to `exposed-modules` in `ModelMirros.cabal`.
+Both modules added to `exposed-modules` in `ModelMirrors.cabal`.

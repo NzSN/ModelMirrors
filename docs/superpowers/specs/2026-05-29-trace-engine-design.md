@@ -19,7 +19,7 @@ src/Engine/Types.hs        -- Step, VarDiff, StateDiff
 src/Engine/Core.hs         -- traceSteps, diffState
 ```
 
-`Engine` is added to `exposed-modules` in `ModelMirros.cabal`.
+`Engine` is added to `exposed-modules` in `ModelMirrors.cabal`.
 
 The engine has no dependency on `Protocol.*`. It does depend on `Apalache.Types` for `Value` and `ItfTrace`. The `Map` and `Text` dependencies are already in the package.
 
