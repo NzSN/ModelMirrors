@@ -10,4 +10,5 @@ haskell_binary(
         "@stackage//:containers",
         "@stackage//:text",
     ],
+    visibility = ["//visibility:public"]
 )
