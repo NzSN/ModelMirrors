@@ -15,6 +15,7 @@ data ApalacheConfig = ApalacheConfig
   , initPredicate :: !(Maybe Text)
   , nextPredicate :: !(Maybe Text)
   , constInit     :: !(Maybe Text)
+  , view          :: !(Maybe Text)
   } deriving (Show, Eq)
 
 data ValidateResult

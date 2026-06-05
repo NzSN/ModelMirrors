@@ -26,6 +26,7 @@ config = ApalacheConfig
   , initPredicate = Nothing
   , nextPredicate = Nothing
   , constInit     = Nothing
+  , view          = Nothing
   }
 
 traceConfig :: TraceGenerationConfig

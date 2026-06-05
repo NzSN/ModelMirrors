@@ -26,7 +26,7 @@ main = do
 
 runMirror :: FilePath -> TraceGenerationConfig -> IO ()
 runMirror specPath config = do
-  let cfg = ApalacheConfig specPath Nothing Nothing (cinit config)
+  let cfg = ApalacheConfig specPath Nothing Nothing (cinit config) Nothing
   result <- validateSpec cfg (lengthBound config)
   case result of
     Left err ->

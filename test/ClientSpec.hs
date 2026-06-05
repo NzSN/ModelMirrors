@@ -158,6 +158,7 @@ hcApalacheConfig = ApalacheConfig
   , initPredicate = Nothing
   , nextPredicate = Nothing
   , constInit     = Nothing
+  , view          = Nothing
   }
 
 hcTraceConfig :: TraceGenerationConfig
