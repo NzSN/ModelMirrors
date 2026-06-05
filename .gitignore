@@ -7,3 +7,4 @@ tags
 tagsdb/*
 .cache/*
 bazel-*
+MODULE.bazel.lock
