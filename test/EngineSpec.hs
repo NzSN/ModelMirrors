@@ -5,6 +5,8 @@ import Engine.Core (traceSteps, diffState)
 import Engine.Replay (EngineM (..), StateDriver (..))
 import Engine.Types (Step (..), StepCommand (..), StateDiff (..), VarDiff (..))
 
+import qualified Data.Aeson as A
+import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Data.Functor.Identity (runIdentity)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -28,6 +30,7 @@ spec = testGroup "EngineSpec"
   , testReplayAllMatch
   , testReplayFirstMismatch
   , testReplaySecondMismatch
+  , testDecodeMap
   ]
 
 ----------------------------------------------------------------------
@@ -145,3 +148,14 @@ testReplaySecondMismatch = testCase "replayTrace second mismatch" $ do
   case runIdentity (replayTrace trace report) of
     [StatesMatch, StateMismatch{}] -> pure ()
     other -> assertFailure $ "expected [StatesMatch, StateMismatch], got " ++ show other
+
+testDecodeMap :: TestTree
+testDecodeMap = testCase "decode #map to VRecord" $ do
+  let json = LBS8.pack "{\"#map\": [[0, {\"bh\": 0}], [1, {\"bh\": 0}]]}"
+      expected = VRecord $ Map.fromList
+        [ (T.pack "0", VRecord (Map.singleton (T.pack "bh") (VInt 0)))
+        , (T.pack "1", VRecord (Map.singleton (T.pack "bh") (VInt 0)))
+        ]
+  case A.decode json of
+    Just v  -> v @?= expected
+    Nothing -> assertFailure "decode #map failed"

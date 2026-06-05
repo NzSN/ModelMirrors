@@ -145,6 +145,20 @@ instance FromJSON Value where
     | Just (A.Array arr) <- KM.lookup (fromString "#tup") o
     = VTuple <$> mapM A.parseJSON (F.toList arr)
 
+    | Just (A.Array arr) <- KM.lookup (fromString "#map") o
+    = let parseEntry v = case v of
+            A.Array pairArr -> case F.toList pairArr of
+              [k, jsonV] -> do
+                kVal <- A.parseJSON k
+                vVal <- A.parseJSON jsonV
+                pure (valueToText kVal, vVal)
+              _ -> fail "Expected [key, value] pair in #map entry"
+            _ -> fail "Expected array in #map entry"
+          valueToText (VInt i) = T.pack (show i)
+          valueToText (VStr s) = s
+          valueToText v        = T.pack (show v)
+      in VRecord . Map.fromList <$> mapM parseEntry (F.toList arr)
+
     | otherwise = do
         pairs <- mapM (\(k, v) -> (toText k,) <$> A.parseJSON v) (KM.toList o)
         pure $ VRecord (Map.fromList pairs)

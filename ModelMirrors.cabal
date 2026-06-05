@@ -159,6 +159,7 @@ test-suite ModelMirrors-test
     -- Test dependencies.
     build-depends:
         base ^>=4.22.0.0,
+        aeson       >=2.0,
         bytestring  >=0.10,
         containers  >=0.6,
         directory   >=1.3,

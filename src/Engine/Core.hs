@@ -33,4 +33,6 @@ diffState expected actual =
        _  -> StateMismatch expected' actual' diffs
 
 isMetaKey :: Text -> Bool
-isMetaKey k = (T.length k > 0 && T.head k == '#') || k == T.pack "action_taken"
+isMetaKey k = (T.length k > 0 && T.head k == '#') ||
+              k == T.pack "action_taken" ||
+              k == T.pack "parameters"
