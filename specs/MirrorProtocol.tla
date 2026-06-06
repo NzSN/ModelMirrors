@@ -21,6 +21,7 @@ STEP_OK         == 6
 STEP_MISMATCH   == 7
 ALL_STEPS_DONE  == 8
 PROTOCOL_ERROR  == 9
+REGISTER_TRACES == 10
 
 \* No-message sentinel — means the channel is empty
 NO_MSG == -1
@@ -49,6 +50,14 @@ ClientRegister ==
   /\ cl_to_mir = NO_MSG
   /\ cp' = "waiting_validation"
   /\ cl_to_mir' = REGISTER
+  /\ UNCHANGED <<mp, mir_to_cl>>
+
+ClientRegisterTraces ==
+  /\ cp = "idle"
+  /\ mp = "idle"
+  /\ cl_to_mir = NO_MSG
+  /\ cp' = "waiting_validation"
+  /\ cl_to_mir' = REGISTER_TRACES
   /\ UNCHANGED <<mp, mir_to_cl>>
 
 ClientReport ==
@@ -129,6 +138,14 @@ MirrorRecvRegister ==
   /\ cl_to_mir' = NO_MSG
   /\ UNCHANGED <<cp, mir_to_cl>>
 
+MirrorRecvRegisterTraces ==
+  /\ cl_to_mir = REGISTER_TRACES
+  /\ mp = "idle"
+  /\ mp' = "ready"
+  /\ cl_to_mir' = NO_MSG
+  /\ mir_to_cl' = SPEC_VALIDATED
+  /\ UNCHANGED cp
+
 \* Mirror receives ReportState.
 \* Nondeterministic branches encode: state match or mismatch,
 \* and whether more trace steps remain.
@@ -200,6 +217,7 @@ Init ==
 
 Next ==
   \/ ClientRegister
+  \/ ClientRegisterTraces
   \/ ClientReport
   \/ ClientRecvSpecValidated
   \/ ClientRecvInitialState
@@ -210,6 +228,7 @@ Next ==
   \/ ClientRecvProtocolError
   \/ ClientRecvRegisterError
   \/ MirrorRecvRegister
+  \/ MirrorRecvRegisterTraces
   \/ MirrorRecvReportState
   \/ MirrorSendSpecValidatedValid
   \/ MirrorSendSpecValidatedInvalid
