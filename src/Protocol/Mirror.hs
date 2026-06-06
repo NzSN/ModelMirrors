@@ -22,7 +22,7 @@ import Protocol.Transport.Core (Transport, sendMsg)
 
 runMirror :: Transport t => t -> FilePath -> TraceGenerationConfig -> IO ()
 runMirror transport specPath config = do
-  let cfg = ApalacheConfig specPath Nothing Nothing (cinit config) Nothing
+  let cfg = ApalacheConfig specPath Nothing Nothing (cinit config)
   traceRes <- generateTraces cfg config
   case traceRes of
     Left err ->

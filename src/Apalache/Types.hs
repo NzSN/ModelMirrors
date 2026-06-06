@@ -15,7 +15,6 @@ data ApalacheConfig = ApalacheConfig
   , initPredicate :: !(Maybe Text)
   , nextPredicate :: !(Maybe Text)
   , constInit     :: !(Maybe Text)
-  , view          :: !(Maybe Text)
   } deriving (Show, Eq)
 
 data ValidateResult
@@ -36,6 +35,7 @@ data TraceGenerationConfig = TraceGenerationConfig
   { invariant   :: !Text
   , lengthBound :: !Int
   , numTraces   :: !Int
+  , view        :: !(Maybe Text)
   , cinit       :: !(Maybe Text)
   , paramVarNames :: !Text
   } deriving (Show, Eq)
@@ -45,6 +45,7 @@ instance ToJSON TraceGenerationConfig where
     [ fromString "invariant" .= invariant c
     , fromString "lengthBound" .= lengthBound c
     , fromString "numTraces" .= numTraces c
+    , fromString "view" .= view c
     , fromString "cinit" .= cinit c
     , fromString "paramVars" .= paramVarNames c
     ]
@@ -55,6 +56,7 @@ instance FromJSON TraceGenerationConfig where
       <$> o .: fromString "invariant"
       <*> o .: fromString "lengthBound"
       <*> o .: fromString "numTraces"
+      <*> o .:? fromString "view" .!= Nothing
       <*> o .:? fromString "cinit" .!= Nothing
       <*> o .:? fromString "paramVars" .!= T.empty
 

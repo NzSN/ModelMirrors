@@ -87,7 +87,6 @@ checkArgs cfg bound =
     , optionalArg "--init=" (initPredicate cfg)
     , optionalArg "--next=" (nextPredicate cfg)
     , optionalArg "--cinit=" (constInit cfg)
-    , optionalArg "--view=" (view cfg)
     , [specPath cfg]
     ]
 
@@ -102,7 +101,7 @@ traceArgs cfg tc =
     , optionalArg "--init=" (initPredicate cfg)
     , optionalArg "--next=" (nextPredicate cfg)
     , optionalArg "--cinit=" (constInit cfg)
-    , optionalArg "--view=" (view cfg)
+    , optionalArg "--view=" (view tc)
     , [specPath cfg]
     ]
 

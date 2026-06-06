@@ -27,7 +27,6 @@ config = ApalacheConfig
   , initPredicate = Nothing
   , nextPredicate = Nothing
   , constInit     = Nothing
-  , view          = Nothing
   }
 
 traceConfig :: TraceGenerationConfig
@@ -35,6 +34,7 @@ traceConfig = TraceGenerationConfig
   { invariant      = T.pack "TraceComplete"
   , lengthBound    = 13
   , numTraces      = 1
+  , view           = Nothing
   , cinit          = Nothing
   , paramVarNames  = T.empty
   }
