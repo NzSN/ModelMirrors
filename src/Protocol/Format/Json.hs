@@ -16,6 +16,10 @@ instance ToJSON ClientMessage where
     , fromString "specPath" .= path
     , fromString "traceConfig" .= config
     ]
+  toJSON (RegisterTraces traces) = object
+    [ fromString "proto_step" .= T.pack "register_traces"
+    , fromString "itfTraces" .= traces
+    ]
   toJSON (ReportState state) = object
     [ fromString "proto_step" .= T.pack "report_state"
     , fromString "state" .= state
@@ -27,6 +31,8 @@ instance FromJSON ClientMessage where
     case tag of
       t | t == T.pack "register" ->
           Register <$> o .: fromString "specPath" <*> o .: fromString "traceConfig"
+      t | t == T.pack "register_traces" ->
+          RegisterTraces <$> o .: fromString "itfTraces"
       t | t == T.pack "report_state" ->
           ReportState <$> o .: fromString "state"
       _ ->

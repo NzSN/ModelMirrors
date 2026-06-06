@@ -1,12 +1,13 @@
 module Protocol.Client
   ( Client (..)
   , runClient
+  , runClientWithTraces
   , cannedClient
   , fixedClient
   , hourClockClient
   ) where
 
-import Apalache.Types (TraceGenerationConfig, ValidateResult (..), Value (..))
+import Apalache.Types (ItfTrace, TraceGenerationConfig, ValidateResult (..), Value (..))
 import Data.IORef
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -24,6 +25,17 @@ data Client t = Client
 runClient :: Transport t => Client t -> FilePath -> TraceGenerationConfig -> IO (Either Text ())
 runClient client specPath config = do
   sendMsg (clientTransport client) (Register specPath config)
+  recvMsg (clientTransport client) >>= \case
+    Left err                               -> pure (Left (T.pack err))
+    Right (SpecValidated SpecValid)       -> stepLoop client
+    Right (SpecValidated (SpecInvalid e)) -> pure (Left e)
+    Right (RegisterError e)               -> pure (Left e)
+    Right (ProtocolError e)               -> pure (Left e)
+    Right _                                -> pure (Left (T.pack "Unexpected message: expected SpecValidated"))
+
+runClientWithTraces :: Transport t => Client t -> [ItfTrace] -> IO (Either Text ())
+runClientWithTraces client traces = do
+  sendMsg (clientTransport client) (RegisterTraces traces)
   recvMsg (clientTransport client) >>= \case
     Left err                               -> pure (Left (T.pack err))
     Right (SpecValidated SpecValid)       -> stepLoop client

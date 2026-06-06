@@ -1,5 +1,6 @@
 module Protocol.Mirror
   ( runMirror
+  , runMirrorWithTraces
   ) where
 
 import Apalache.Command (generateTraces)
@@ -35,6 +36,14 @@ runMirror transport specPath config = do
       sendMsg transport AllStepsDone
     Right (GenerationError e) ->
       sendMsg transport (ProtocolError e)
+
+runMirrorWithTraces :: Transport t => t -> [ItfTrace] -> IO ()
+runMirrorWithTraces transport traces = do
+  sendMsg transport (SpecValidated SpecValid)
+  let driver = makeTransportDriver transport
+  forM_ traces $ \trace ->
+    replaySteps transport driver trace
+  sendMsg transport AllStepsDone
 
 replaySteps :: Transport t => t -> StateDriver IO -> ItfTrace -> IO ()
 replaySteps transport driver trace = do
