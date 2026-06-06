@@ -37,3 +37,39 @@ The protocol should allow following workflow:
 9. report that implementation is correct with respect to the 
    given itf trace.
 
+## Client Messages
+
+### Register
+`proto_step: "register"` — Full pipeline. Mirror validates the TLA+ spec and generates traces.
+
+```json
+{"proto_step": "register", "specPath": "path/to/spec.tla", "traceConfig": {...}}
+```
+
+### RegisterTraces
+`proto_step: "register_traces"` — Provide ITF traces directly. Mirror skips spec validation and
+trace generation, replaying the given traces immediately against the client.
+
+```json
+{"proto_step": "register_traces", "itfTraces": [{...}, ...]}
+```
+
+### ReportState
+`proto_step: "report_state"` — Client reports its actual state after executing a step.
+
+```json
+{"proto_step": "report_state", "state": {...}}
+```
+
+## Mirror Messages
+
+| `proto_step`       | Description                                   |
+|---------------------|-----------------------------------------------|
+| `spec_validated`    | Spec validation result (valid/invalid)        |
+| `register_error`    | Error during spec validation/trace generation |
+| `initial_state`     | Initial state from the trace                  |
+| `next_step`         | Next step action and parameters               |
+| `step_ok`           | Client state matched expected state           |
+| `step_mismatch`     | Client state diverged from expected state     |
+| `all_steps_done`    | All traces replayed successfully              |
+| `protocol_error`    | Protocol-level error                          |
