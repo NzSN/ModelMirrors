@@ -6,6 +6,7 @@ import qualified Apalache.TypesSpec as TypesSpec
 import qualified ClientSpec
 import qualified EngineSpec
 import qualified MainSpec
+import qualified MirrorProtocolSpec
 import Test.Tasty (defaultMain, testGroup)
 
 main :: IO ()
@@ -16,4 +17,5 @@ main = defaultMain $ testGroup "ModelMirrors"
   , TraceSpec.spec
   , TypesSpec.spec
   , MainSpec.spec
+  , MirrorProtocolSpec.spec
   ]

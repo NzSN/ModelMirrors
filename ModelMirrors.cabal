@@ -74,6 +74,7 @@ library
         Engine.Types,
         Protocol.Client,
         Protocol.Core,
+        Protocol.Mirror,
         Protocol.Format.Json,
         Protocol.Transport.Core,
         Protocol.Transport.Mock,
@@ -142,7 +143,8 @@ test-suite ModelMirrors-test
         Apalache.TypesSpec,
         ClientSpec,
         EngineSpec,
-        MainSpec
+        MainSpec,
+        MirrorProtocolSpec
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

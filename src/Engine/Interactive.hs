@@ -1,25 +1,26 @@
-module Engine.Interactive (stdioJSONDriver) where
+module Engine.Interactive
+  ( stdioJSONDriver
+  , makeTransportDriver
+  ) where
 
 import qualified Data.Map.Strict as Map
-import Engine.Replay (EngineM (..), StateDriver (..), StateDiff (..))
+import Engine.Replay (StateDriver (..))
 import Engine.Types (StepCommand (..))
 import Protocol.Core (MirrorMessage (..), ClientMessage (..))
 import Protocol.Format.Json ()
-import Protocol.Transport.Core (sendMsg, recvMsg)
+import Protocol.Transport.Core (Transport, sendMsg, recvMsg)
 import Protocol.Transport.Stdio (StdioTransport (..))
 
-instance EngineM IO where
-  onStepResult StatesMatch = sendMsg StdioTransport StepOk
-  onStepResult (StateMismatch expected actual _) =
-    sendMsg StdioTransport (StepMismatch expected actual)
-
-stdioJSONDriver :: StateDriver IO
-stdioJSONDriver = StateDriver $ \cmd -> do
-  sendMsg StdioTransport (commandToMessage cmd)
-  resp <- recvMsg StdioTransport
+makeTransportDriver :: Transport t => t -> StateDriver IO
+makeTransportDriver transport = StateDriver $ \cmd -> do
+  sendMsg transport (commandToMessage cmd)
+  resp <- recvMsg transport
   case resp of
     Right (ReportState state) -> pure state
     _                         -> pure Map.empty
+
+stdioJSONDriver :: StateDriver IO
+stdioJSONDriver = makeTransportDriver StdioTransport
 
 commandToMessage :: StepCommand -> MirrorMessage
 commandToMessage (CmdInitial act state) = InitialState act state

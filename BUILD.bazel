@@ -1,6 +1,6 @@
 load("@rules_haskell//haskell:defs.bzl", "haskell_toolchain_library")
 
-exports_files(["stackage_snapshot.yaml"])
+exports_files(["stackage_snapshot.yaml", "specs/MirrorProtocolServer.tla"])
 
 haskell_toolchain_library(
     name = "base",
