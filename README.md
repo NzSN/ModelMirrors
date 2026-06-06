@@ -16,14 +16,14 @@ stdin/stdout using JSON messages. This means clients can be written in any
 language — they just need to speak the protocol.
 
 ```
-+----------------+     JSON over stdin/stdout     +----------------+
-|  Client Process | <----------------------------> | Mirror Process  |
-| (your impl)     |                                 | (ModelMirrors)  |
-+----------------+                                 +----------------+
++----------------+     JSON over stdin/stdout     +-----------------+
+| Client Process | <----------------------------> | Mirror Process  |
+| (your impl)    |                                | (ModelMirrors)  |
++----------------+                                +-----------------+
                                                           |
                                                     +-----+------+
-                                                    | Apalache    |
-                                                    | (TLA+ spec) |
+                                                    | Apalache   |
+                                                    | (TLA+ spec)|
                                                     +------------+
 ```
 
@@ -35,7 +35,7 @@ The mirror validates the spec, generates traces, then replays them:
 
 ```
 Client                Mirror
-  | --- register -------> |
+  | --- register --------> |
   |                        | -- validate spec + generate traces
   | <-- spec_validated --- |
   | <-- initial_state ---- |
