@@ -4,13 +4,13 @@ module Protocol.Core
   , ProtocolState (..)
   ) where
 
-import Apalache.Types (ItfTrace, TraceGenerationConfig, ValidateResult, Value)
+import Apalache.Types (TraceGenerationConfig, ValidateResult, Value)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 
 data ClientMessage
   = Register !FilePath !TraceGenerationConfig
-  | RegisterTraces ![ItfTrace]
+  | RegisterTraces ![FilePath]
   | ReportState !(Map Text Value)
   deriving (Show, Eq)
 

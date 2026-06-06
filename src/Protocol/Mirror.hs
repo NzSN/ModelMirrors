@@ -4,6 +4,7 @@ module Protocol.Mirror
   ) where
 
 import Apalache.Command (generateTraces)
+import Apalache.Trace (readTrace)
 import Apalache.Types
     ( ApalacheConfig (..)
     , ApalacheError (..)
@@ -13,6 +14,7 @@ import Apalache.Types
     , ValidateResult (..)
     )
 import Control.Monad (forM_)
+import Data.Text qualified as T
 import Engine.Core (diffState, traceSteps)
 import Engine.Interactive (makeTransportDriver)
 import Engine.Replay (StateDriver (..))
@@ -37,13 +39,17 @@ runMirror transport specPath config = do
     Right (GenerationError e) ->
       sendMsg transport (ProtocolError e)
 
-runMirrorWithTraces :: Transport t => t -> [ItfTrace] -> IO ()
-runMirrorWithTraces transport traces = do
-  sendMsg transport (SpecValidated SpecValid)
-  let driver = makeTransportDriver transport
-  forM_ traces $ \trace ->
-    replaySteps transport driver trace
-  sendMsg transport AllStepsDone
+runMirrorWithTraces :: Transport t => t -> [FilePath] -> IO ()
+runMirrorWithTraces transport tracePaths = do
+  traces <- mapM readTrace tracePaths
+  case sequence traces of
+    Left err -> sendMsg transport (RegisterError (T.pack err))
+    Right parsed -> do
+      sendMsg transport (SpecValidated SpecValid)
+      let driver = makeTransportDriver transport
+      forM_ parsed $ \trace ->
+        replaySteps transport driver trace
+      sendMsg transport AllStepsDone
 
 replaySteps :: Transport t => t -> StateDriver IO -> ItfTrace -> IO ()
 replaySteps transport driver trace = do
