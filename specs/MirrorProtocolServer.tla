@@ -17,13 +17,14 @@ Ms == {"idle", "validating", "ready", "stepping", "done"}
 \* -----------------------------------------------------------------------------
 
 REGISTER        == 0
-REPORT_STATE    == 1
-SPEC_VALIDATED  == 2
-INITIAL_STATE   == 3
-NEXT_STEP       == 4
-STEP_OK         == 5
-STEP_MISMATCH   == 6
-ALL_STEPS_DONE  == 7
+REGISTER_ERROR  == 1
+REPORT_STATE    == 2
+SPEC_VALIDATED  == 3
+INITIAL_STATE   == 4
+NEXT_STEP       == 5
+STEP_OK         == 6
+STEP_MISMATCH   == 7
+ALL_STEPS_DONE  == 8
 
 \* No-message sentinel — means the channel is empty
 NO_MSG == -1
@@ -94,6 +95,14 @@ MirrorSendSpecValidatedInvalid ==
   /\ action_taken' = "MirrorSendSpecValidatedInvalid"
   /\ UNCHANGED <<cl_to_mir, step_count>>
 
+MirrorSendRegisterError ==
+  /\ mp = "validating"
+  /\ mir_to_cl = NO_MSG
+  /\ mp' = "done"
+  /\ mir_to_cl' = REGISTER_ERROR
+  /\ action_taken' = "MirrorSendRegisterError"
+  /\ UNCHANGED <<cl_to_mir, step_count>>
+
 MirrorSendInitialState ==
   /\ mp = "ready"
   /\ mir_to_cl = NO_MSG
@@ -152,6 +161,7 @@ Next ==
   \/ MirrorRecvReportState
   \/ MirrorSendSpecValidatedValid
   \/ MirrorSendSpecValidatedInvalid
+  \/ MirrorSendRegisterError
   \/ MirrorSendInitialState
   \/ MirrorSendNextStep
   \/ ClientSendRegister
