@@ -12,6 +12,7 @@ haskell_test(
         "//src:ModelMirrors",
         "//:base",
         "@apalache_mc//:apalache-mc",
+        "@stackage//:aeson",
         "@stackage//:bytestring",
         "@stackage//:containers",
         "@stackage//:directory",

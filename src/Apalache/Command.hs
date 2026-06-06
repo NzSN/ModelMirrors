@@ -14,17 +14,35 @@ import Apalache.Types
 import Apalache.Trace (findTraces)
 
 import qualified Data.Text as T
+import System.Directory (doesFileExist)
+import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
+import System.FilePath ((</>))
 import System.Process (readProcessWithExitCode)
+
+apalacheBin :: IO FilePath
+apalacheBin = do
+  mEnv <- lookupEnv "APALACHE_MC"
+  case mEnv of
+    Just path -> pure path
+    Nothing -> do
+      mRf <- lookupEnv "RUNFILES_DIR"
+      case mRf of
+        Just rf -> do
+          let runfilePath = rf </> "+apalache_mc_repository+apalache_mc" </> "apalache-mc"
+          exists <- doesFileExist runfilePath
+          pure $ if exists then runfilePath else "apalache-mc"
+        Nothing -> pure "apalache-mc"
 
 validateSpec :: ApalacheConfig -> Int -> IO (Either ApalacheError ValidateResult)
 validateSpec cfg bound = do
-  (tcExit, tcOut, tcErr) <- readProcessWithExitCode "apalache-mc" (tcArgs cfg) ""
+  bin <- apalacheBin
+  (tcExit, tcOut, tcErr) <- readProcessWithExitCode bin (tcArgs cfg) ""
   case tcExit of
     ExitFailure _ ->
       pure $ Right $ SpecInvalid (T.pack (tcOut ++ tcErr))
     ExitSuccess -> do
-      (cExit, cOut, cErr) <- readProcessWithExitCode "apalache-mc" (checkArgs cfg bound) ""
+      (cExit, cOut, cErr) <- readProcessWithExitCode bin (checkArgs cfg bound) ""
       case cExit of
         ExitSuccess -> pure $ Right SpecValid
         ExitFailure _ ->
@@ -32,7 +50,8 @@ validateSpec cfg bound = do
 
 generateTraces :: ApalacheConfig -> TraceGenerationConfig -> IO (Either ApalacheError TraceGenerationResult)
 generateTraces cfg tc = do
-  (_exit, out, err) <- readProcessWithExitCode "apalache-mc" (traceArgs cfg tc) ""
+  bin <- apalacheBin
+  (_exit, out, err) <- readProcessWithExitCode bin (traceArgs cfg tc) ""
   case parseOutputDir (out ++ err) of
     Nothing ->
       pure $ Left $ ApalacheError (T.pack "Could not determine output directory from Apalache output")

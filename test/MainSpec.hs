@@ -131,12 +131,12 @@ testCounterEndToEnd = testCase "Counter end-to-end" $ do
           ]
 
         stateLines = concat $ replicate 2
-          [ mkReport 0  "init" 0
-          , mkReport 2  "tick" 1
-          , mkReport 4  "tick" 2
-          , mkReport 6  "tick" 3
-          , mkReport 8  "tick" 4
-          , mkReport 10 "tick" 5
+          [ mkReport (0 :: Int)  "init" (0 :: Int)
+          , mkReport (2 :: Int)  "tick" (1 :: Int)
+          , mkReport (4 :: Int)  "tick" (2 :: Int)
+          , mkReport (6 :: Int)  "tick" (3 :: Int)
+          , mkReport (8 :: Int)  "tick" (4 :: Int)
+          , mkReport (10 :: Int) "tick" (5 :: Int)
           ]
 
         input = B8.pack $ unlines $ registerLine : stateLines
