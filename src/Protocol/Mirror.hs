@@ -2,7 +2,7 @@ module Protocol.Mirror
   ( runMirror
   ) where
 
-import Apalache.Command (generateTraces, validateSpec)
+import Apalache.Command (generateTraces)
 import Apalache.Types
     ( ApalacheConfig (..)
     , ApalacheError (..)
@@ -12,38 +12,29 @@ import Apalache.Types
     , ValidateResult (..)
     )
 import Control.Monad (forM_)
-import Data.Text qualified as T
 import Engine.Core (diffState, traceSteps)
 import Engine.Interactive (makeTransportDriver)
 import Engine.Replay (StateDriver (..))
 import Engine.Types (Step (..), StepCommand (..), StateDiff (..))
-import Protocol.Core (ClientMessage (..), MirrorMessage (..))
+import Protocol.Core (MirrorMessage (..))
 import Protocol.Format.Json ()
-import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
+import Protocol.Transport.Core (Transport, sendMsg)
 
 runMirror :: Transport t => t -> FilePath -> TraceGenerationConfig -> IO ()
 runMirror transport specPath config = do
   let cfg = ApalacheConfig specPath Nothing Nothing (cinit config) Nothing
-  result <- validateSpec cfg (lengthBound config)
-  case result of
+  traceRes <- generateTraces cfg config
+  case traceRes of
     Left err ->
-      sendMsg transport (ProtocolError (unApalacheError err))
-    Right validationResult -> do
-      sendMsg transport (SpecValidated validationResult)
-      case validationResult of
-        SpecInvalid _ -> pure ()
-        SpecValid -> do
-          traceRes <- generateTraces cfg config
-          case traceRes of
-            Left err ->
-              sendMsg transport (ProtocolError (unApalacheError err))
-            Right (TracesGenerated traces) -> do
-              let driver = makeTransportDriver transport
-              forM_ traces $ \trace ->
-                replaySteps transport driver trace
-              sendMsg transport AllStepsDone
-            Right (GenerationError e) ->
-              sendMsg transport (ProtocolError e)
+      sendMsg transport (RegisterError (unApalacheError err))
+    Right (TracesGenerated traces) -> do
+      sendMsg transport (SpecValidated SpecValid)
+      let driver = makeTransportDriver transport
+      forM_ traces $ \trace ->
+        replaySteps transport driver trace
+      sendMsg transport AllStepsDone
+    Right (GenerationError e) ->
+      sendMsg transport (ProtocolError e)
 
 replaySteps :: Transport t => t -> StateDriver IO -> ItfTrace -> IO ()
 replaySteps transport driver trace = do

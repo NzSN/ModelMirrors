@@ -23,7 +23,7 @@ import Protocol.Mirror (runMirror)
 import Protocol.Transport.Core (recvMsg, sendMsg)
 import Protocol.Transport.Mock (MockTransport, newMockTransport)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=), assertBool, assertFailure)
+import Test.Tasty.HUnit (testCase, assertBool, assertFailure)
 
 spec :: TestTree
 spec = testGroup "MirrorProtocolSpec"
@@ -131,6 +131,12 @@ driveMirror clientEnd steps = go 0 steps
                 Right (SpecValidated _) -> True
                 _ -> False
           pure (i, ("recv SpecValidated", ok, showMsg msg))
+        "MirrorSendRegisterError" -> do
+          msg <- recvMsg clientEnd
+          let ok = case msg of
+                Right (RegisterError _) -> True
+                _ -> False
+          pure (i, ("recv RegisterError", ok, showMsg msg))
         "MirrorSendInitialState" -> do
           msg <- recvMsg clientEnd
           pure (i, ("recv InitialState", checkInitialState msg, showMsg msg))

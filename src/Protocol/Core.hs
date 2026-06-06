@@ -20,6 +20,7 @@ data MirrorMessage
   | StepOk
   | StepMismatch !(Map Text Value) !(Map Text Value)
   | AllStepsDone
+  | RegisterError !Text
   | ProtocolError !Text
   deriving (Show, Eq)
 

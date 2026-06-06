@@ -58,6 +58,10 @@ instance ToJSON MirrorMessage where
   toJSON AllStepsDone = object
     [ fromString "proto_step" .= T.pack "all_steps_done"
     ]
+  toJSON (RegisterError err) = object
+    [ fromString "proto_step" .= T.pack "register_error"
+    , fromString "error" .= err
+    ]
   toJSON (ProtocolError err) = object
     [ fromString "proto_step" .= T.pack "protocol_error"
     , fromString "error" .= err
@@ -81,5 +85,7 @@ instance FromJSON MirrorMessage where
           pure AllStepsDone
       t | t == T.pack "protocol_error" ->
           ProtocolError <$> o .: fromString "error"
+      t | t == T.pack "register_error" ->
+          RegisterError <$> o .: fromString "error"
       _ ->
           fail $ "Unknown MirrorMessage tag: " ++ T.unpack tag

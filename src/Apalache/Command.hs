@@ -51,17 +51,21 @@ validateSpec cfg bound = do
 generateTraces :: ApalacheConfig -> TraceGenerationConfig -> IO (Either ApalacheError TraceGenerationResult)
 generateTraces cfg tc = do
   bin <- apalacheBin
-  (_exit, out, err) <- readProcessWithExitCode bin (traceArgs cfg tc) ""
-  case parseOutputDir (out ++ err) of
-    Nothing ->
-      pure $ Left $ ApalacheError (T.pack "Could not determine output directory from Apalache output")
-    Just outDir -> do
-      traces <- findTraces outDir
-      let pvs = filter (not . T.null) [paramVarNames tc]
-      let traces' = map (applyParamVars pvs) traces
-      case traces' of
-        [] -> pure $ Left $ ApalacheError (T.pack "No ITF trace files found in output directory")
-        _  -> pure $ Right $ TracesGenerated traces'
+  (exit, out, err) <- readProcessWithExitCode bin (traceArgs cfg tc) ""
+  case exit of
+    ExitFailure 255 ->
+      pure $ Left $ ApalacheError (T.pack (out ++ err))
+    _ -> do
+      case parseOutputDir (out ++ err) of
+        Nothing ->
+          pure $ Left $ ApalacheError (T.pack "Could not determine output directory from Apalache output")
+        Just outDir -> do
+          traces <- findTraces outDir
+          let pvs = filter (not . T.null) [paramVarNames tc]
+          let traces' = map (applyParamVars pvs) traces
+          case traces' of
+            [] -> pure $ Left $ ApalacheError (T.pack "No ITF trace files found in output directory")
+            _  -> pure $ Right $ TracesGenerated traces'
 
 parseOutputDir :: String -> Maybe FilePath
 parseOutputDir = go . lines

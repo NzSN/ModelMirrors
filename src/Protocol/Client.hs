@@ -28,6 +28,8 @@ runClient client specPath config = do
     Left err                               -> pure (Left (T.pack err))
     Right (SpecValidated SpecValid)       -> stepLoop client
     Right (SpecValidated (SpecInvalid e)) -> pure (Left e)
+    Right (RegisterError e)               -> pure (Left e)
+    Right (ProtocolError e)               -> pure (Left e)
     Right _                                -> pure (Left (T.pack "Unexpected message: expected SpecValidated"))
 
 stepLoop :: Transport t => Client t -> IO (Either Text ())
