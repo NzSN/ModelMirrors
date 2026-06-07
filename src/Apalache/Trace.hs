@@ -1,5 +1,6 @@
 module Apalache.Trace
   ( readTrace
+  , findTraceFiles
   , findTraces
   ) where
 
@@ -14,13 +15,19 @@ import System.FilePath ((</>), takeFileName)
 readTrace :: FilePath -> IO (Either String ItfTrace)
 readTrace path = eitherDecodeFileStrict' path
 
+-- | Find all ITF trace file paths in a directory (non-recursively).
+-- Looks for files matching @*.itf.json@. Does not parse them.
+findTraceFiles :: FilePath -> IO [FilePath]
+findTraceFiles dir = do
+  files <- listDirectory dir
+  let tf = filter (\f -> ".itf.json" `isSuffixOf` takeFileName f) files
+  pure $ map (dir </>) tf
+
 -- | Find and parse all ITF trace files in a directory.
 -- Looks for files matching @*.itf.json@, reads and parses them.
 -- Silently skips files that fail to parse.
 findTraces :: FilePath -> IO [ItfTrace]
 findTraces dir = do
-  files <- listDirectory dir
-  let tf = filter (\f -> ".itf.json" `isSuffixOf` takeFileName f) files
-  let full = map (dir </>) tf
-  results <- mapM readTrace full
+  paths <- findTraceFiles dir
+  results <- mapM readTrace paths
   pure [t | Right t <- results]

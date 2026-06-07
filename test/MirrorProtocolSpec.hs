@@ -13,15 +13,21 @@ import Apalache.Types
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar
 import Control.Exception (SomeException, catch)
-import Control.Monad (unless)
+import Control.Monad (unless, forM_)
+import Data.Aeson (encode)
+import qualified Data.ByteString.Lazy as BL
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Engine.Core (traceSteps)
+import Engine.Types (Step (..))
 import Protocol.Core (ClientMessage (..), MirrorMessage (..))
 import Protocol.Format.Json ()
-import Protocol.Mirror (runMirror)
+import Protocol.Mirror (runMirror, runMirrorWithTraces)
 import Protocol.Transport.Core (recvMsg, sendMsg)
 import Protocol.Transport.Mock (MockTransport, newMockTransport)
+import System.Directory (createDirectory, getTemporaryDirectory, removeDirectoryRecursive)
+import System.FilePath ((</>))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, assertBool, assertFailure)
 
@@ -29,6 +35,7 @@ spec :: TestTree
 spec = testGroup "MirrorProtocolSpec"
   [ testProtocolTraceGenerated
   , testMirrorFollowsProtocol
+  , testRunMirrorWithTracesDir
   ]
 
 hcTraceConfig :: TraceGenerationConfig
@@ -40,6 +47,71 @@ hcTraceConfig = TraceGenerationConfig
   , cinit          = Nothing
   , paramVarNames  = T.empty
   }
+
+testRunMirrorWithTracesDir :: TestTree
+testRunMirrorWithTracesDir = testCase "runMirrorWithTraces expands directory paths" $ do
+  let cfg = ApalacheConfig
+        { specPath      = "test/specs/HourClock.tla"
+        , initPredicate = Nothing
+        , nextPredicate = Nothing
+        , constInit     = Nothing
+        }
+  result <- generateTraces cfg hcTraceConfig
+  case result of
+    Left err -> assertFailure $ "generateTraces error: " ++ show err
+    Right (GenerationError e) -> assertFailure $ "trace generation error: " ++ T.unpack e
+    Right (TracesGenerated []) -> assertFailure "no traces generated"
+    Right (TracesGenerated traces) -> do
+      sysTmp <- getTemporaryDirectory
+      let tmpDir = sysTmp </> "modelmirrors-test-traces"
+      createDirectory tmpDir
+      forM_ (zip [0 :: Int ..] traces) $ \(i, t) ->
+        BL.writeFile (tmpDir </> "trace_" ++ show i ++ ".itf.json") (encode t)
+
+      (clientEnd, mirrorEnd) <- newMockTransport
+      done <- newEmptyMVar
+      _ <- forkIO $ runMirrorWithTraces mirrorEnd [tmpDir]
+        >> putMVar done True
+        `catch` (\(_ :: SomeException) -> putMVar done False)
+
+      results <- driveMirrorTraces clientEnd traces
+      removeDirectoryRecursive tmpDir
+
+      let mismatches = [(i, msg) | (i, (False, msg)) <- results]
+      unless (null mismatches) $
+        assertFailure $ unlines $
+          ("protocol mismatches (" ++ show (length mismatches) ++ "/" ++ show (length results) ++ "):")
+          : ["  step " ++ show i ++ ": " ++ msg | (i, msg) <- mismatches]
+
+      ok <- readMVar done
+      assertBool "mirror completed without exception" ok
+
+driveMirrorTraces :: MockTransport -> [ItfTrace] -> IO [(Int, (Bool, String))]
+driveMirrorTraces clientEnd traces = do
+  msg <- recvMsg clientEnd
+  case msg of
+    Right (SpecValidated _) -> go 0 steps
+    _ -> pure [(0, (False, "expected SpecValidated, got: " ++ showMsg msg))]
+  where
+    steps = concatMap traceSteps traces
+    go i [] = do
+      msg <- recvMsg clientEnd
+      pure $ case msg of
+        Right AllStepsDone -> [(i, (True, "ok"))]
+        _ -> [(i, (False, "expected AllStepsDone, got: " ++ showMsg msg))]
+    go i (step : rest) = do
+      msg <- recvMsg clientEnd
+      case msg of
+        Right m | isStep m -> do
+          sendMsg clientEnd (ReportState (stepVars step))
+          resp <- recvMsg clientEnd
+          case resp of
+            Right StepOk -> ((i, (True, "ok")) :) <$> go (i + 1) rest
+            _ -> pure [(i, (False, "expected StepOk, got: " ++ showMsg resp))]
+        _ -> pure [(i, (False, "expected InitialState/NextStep, got: " ++ showMsg msg))]
+    isStep InitialState{} = True
+    isStep NextStep{} = True
+    isStep _ = False
 
 testProtocolTraceGenerated :: TestTree
 testProtocolTraceGenerated = testCase "MirrorProtocolServer generates traces" $ do
