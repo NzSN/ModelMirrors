@@ -5,23 +5,25 @@ EXTENDS Integers
 \* Protocol phases (mirror side)
 \* -----------------------------------------------------------------------------
 
-Ms == {"idle", "validating", "ready", "stepping", "done"}
+Ms == {"idle", "validating", "generating", "ready", "stepping", "done"}
 
 \* Client phases
-Cs == Ms \cup {"waiting_validation", "waiting_init", "waiting_action", "waiting_ack"}
+Cs == Ms \cup {"waiting_validation", "waiting_gen", "waiting_init", "waiting_action", "waiting_ack"}
 
 \* Message tags (integers so TLC can enumerate the domain)
-REGISTER        == 0
-REGISTER_ERROR  == 1
-REPORT_STATE    == 2
-SPEC_VALIDATED  == 3
-INITIAL_STATE   == 4
-NEXT_STEP       == 5
-STEP_OK         == 6
-STEP_MISMATCH   == 7
-ALL_STEPS_DONE  == 8
-PROTOCOL_ERROR  == 9
-REGISTER_TRACES == 10
+REGISTER           == 0
+REGISTER_ERROR     == 1
+REPORT_STATE       == 2
+SPEC_VALIDATED     == 3
+INITIAL_STATE      == 4
+NEXT_STEP          == 5
+STEP_OK            == 6
+STEP_MISMATCH      == 7
+ALL_STEPS_DONE     == 8
+PROTOCOL_ERROR     == 9
+REGISTER_TRACES    == 10
+REGISTER_TRACE_GEN == 11
+GEN_TRACES_DONE    == 12
 
 \* No-message sentinel — means the channel is empty
 NO_MSG == -1
@@ -60,6 +62,14 @@ ClientRegisterTraces ==
   /\ cl_to_mir' = REGISTER_TRACES
   /\ UNCHANGED <<mp, mir_to_cl>>
 
+ClientRegisterGenTraces ==
+  /\ cp = "idle"
+  /\ mp = "idle"
+  /\ cl_to_mir = NO_MSG
+  /\ cp' = "waiting_gen"
+  /\ cl_to_mir' = REGISTER_TRACE_GEN
+  /\ UNCHANGED <<mp, mir_to_cl>>
+
 ClientReport ==
   /\ cp = "waiting_action"
   /\ cl_to_mir = NO_MSG
@@ -75,6 +85,13 @@ ClientRecvSpecValidated ==
   /\ mir_to_cl = SPEC_VALIDATED
   /\ cp = "waiting_validation"
   /\ cp' = "waiting_init"
+  /\ mir_to_cl' = NO_MSG
+  /\ UNCHANGED <<mp, cl_to_mir>>
+
+ClientRecvGenTracesDone ==
+  /\ mir_to_cl = GEN_TRACES_DONE
+  /\ cp = "waiting_gen"
+  /\ cp' = "idle"
   /\ mir_to_cl' = NO_MSG
   /\ UNCHANGED <<mp, cl_to_mir>>
 
@@ -146,6 +163,13 @@ MirrorRecvRegisterTraces ==
   /\ mir_to_cl' = SPEC_VALIDATED
   /\ UNCHANGED cp
 
+MirrorRecvRegisterGenTraces ==
+  /\ cl_to_mir = REGISTER_TRACE_GEN
+  /\ mp = "idle"
+  /\ mp' = "generating"
+  /\ cl_to_mir' = NO_MSG
+  /\ UNCHANGED <<cp, mir_to_cl>>
+
 \* Mirror receives ReportState.
 \* Nondeterministic branches encode: state match or mismatch,
 \* and whether more trace steps remain.
@@ -164,6 +188,13 @@ MirrorRecvReportState ==
 \* -----------------------------------------------------------------------------
 \* Mirror actions — send messages to client
 \* -----------------------------------------------------------------------------
+
+MirrorSendGenTracesDone ==
+  /\ mp = "generating"
+  /\ mir_to_cl = NO_MSG
+  /\ mp' = "idle"
+  /\ mir_to_cl' = GEN_TRACES_DONE
+  /\ UNCHANGED <<cp, cl_to_mir>>
 
 MirrorSendSpecValidatedValid ==
   /\ mp = "validating"
@@ -218,8 +249,10 @@ Init ==
 Next ==
   \/ ClientRegister
   \/ ClientRegisterTraces
+  \/ ClientRegisterGenTraces
   \/ ClientReport
   \/ ClientRecvSpecValidated
+  \/ ClientRecvGenTracesDone
   \/ ClientRecvInitialState
   \/ ClientRecvNextStep
   \/ ClientRecvStepOk
@@ -229,7 +262,9 @@ Next ==
   \/ ClientRecvRegisterError
   \/ MirrorRecvRegister
   \/ MirrorRecvRegisterTraces
+  \/ MirrorRecvRegisterGenTraces
   \/ MirrorRecvReportState
+  \/ MirrorSendGenTracesDone
   \/ MirrorSendSpecValidatedValid
   \/ MirrorSendSpecValidatedInvalid
   \/ MirrorSendRegisterError
