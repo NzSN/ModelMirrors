@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 module MirrorProtocolSpec (spec) where
 
-import Apalache.Command (generateTraces)
+import Apalache.Command (generateTraces, generateTraceFiles)
+import Apalache.Trace (readTrace)
 import Apalache.Types
     ( ApalacheConfig (..)
     , ItfTrace (..)
@@ -16,6 +17,8 @@ import Control.Exception (SomeException, catch)
 import Control.Monad (unless, forM_)
 import Data.Aeson (encode)
 import qualified Data.ByteString.Lazy as BL
+import System.Timeout (timeout)
+import Data.List (isPrefixOf)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -23,11 +26,11 @@ import Engine.Core (traceSteps)
 import Engine.Types (Step (..))
 import Protocol.Core (ClientMessage (..), MirrorMessage (..))
 import Protocol.Format.Json ()
-import Protocol.Mirror (runMirror, runMirrorWithTraces)
+import Protocol.Mirror (runMirror, runMirrorWithTraces, runMirrorGenTraces)
 import Protocol.Transport.Core (recvMsg, sendMsg)
 import Protocol.Transport.Mock (MockTransport, newMockTransport)
 import System.Directory (createDirectory, getTemporaryDirectory, removeDirectoryRecursive)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeExtension)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, assertBool, assertFailure)
 
@@ -35,7 +38,11 @@ spec :: TestTree
 spec = testGroup "MirrorProtocolSpec"
   [ testProtocolTraceGenerated
   , testMirrorFollowsProtocol
+  , testMbtMirrorProtocol
   , testRunMirrorWithTracesDir
+  , testRunMirrorGenTraces
+  , testRunMirrorGenTracesWithDest
+  , testRunMirrorGenThenReplay
   ]
 
 hcTraceConfig :: TraceGenerationConfig
@@ -86,6 +93,88 @@ testRunMirrorWithTracesDir = testCase "runMirrorWithTraces expands directory pat
       ok <- readMVar done
       assertBool "mirror completed without exception" ok
 
+testRunMirrorGenTraces :: TestTree
+testRunMirrorGenTraces = testCase "runMirrorGenTraces generates and notifies done" $ do
+  (clientEnd, mirrorEnd) <- newMockTransport
+  done <- newEmptyMVar
+  _ <- forkIO $ runMirrorGenTraces mirrorEnd "test/specs/HourClock.tla" hcTraceConfig Nothing
+        >> putMVar done True
+        `catch` (\(_ :: SomeException) -> putMVar done False)
+
+  msg <- recvMsg clientEnd
+  paths <- case msg of
+    Right (GenTracesDone ps) -> do
+      assertBool "GenTracesDone has at least one path" (not (null ps))
+      pure ps
+    _ -> assertFailure $ "expected GenTracesDone, got: " ++ showMsg msg
+
+  ok <- readMVar done
+  assertBool "mirror completed without exception" ok
+
+  assertBool "generated paths are valid files" (not (null paths) && all (\p -> takeExtension p == ".json") paths)
+
+testRunMirrorGenTracesWithDest :: TestTree
+testRunMirrorGenTracesWithDest = testCase "runMirrorGenTraces copies to destPath" $ do
+  sysTmp <- getTemporaryDirectory
+  let destDir = sysTmp </> "modelmirrors-test-gendest"
+  createDirectory destDir
+
+  (clientEnd, mirrorEnd) <- newMockTransport
+  done <- newEmptyMVar
+  _ <- forkIO $ runMirrorGenTraces mirrorEnd "test/specs/HourClock.tla" hcTraceConfig (Just destDir)
+        >> putMVar done True
+        `catch` (\(_ :: SomeException) -> putMVar done False)
+
+  msg <- recvMsg clientEnd
+  _ <- case msg of
+    Right (GenTracesDone ps) -> do
+      assertBool "GenTracesDone has at least one path" (not (null ps))
+      assertBool "all paths point to destDir" (all (destDir `isPrefixOf`) ps)
+      pure ps
+    _ -> assertFailure $ "expected GenTracesDone, got: " ++ showMsg msg
+
+  ok <- readMVar done
+  removeDirectoryRecursive destDir
+  assertBool "mirror completed without exception" ok
+
+testRunMirrorGenThenReplay :: TestTree
+testRunMirrorGenThenReplay = testCase "runMirrorGenTraces then RegisterTraces replays" $ do
+  (clientEnd1, mirrorEnd1) <- newMockTransport
+  done1 <- newEmptyMVar
+  _ <- forkIO $ runMirrorGenTraces mirrorEnd1 "test/specs/HourClock.tla" hcTraceConfig Nothing
+        >> putMVar done1 True
+        `catch` (\(_ :: SomeException) -> putMVar done1 False)
+
+  msg <- recvMsg clientEnd1
+  generatedPaths <- case msg of
+    Right (GenTracesDone ps) ->
+      assertBool "GenTracesDone has paths" (not (null ps)) >> pure ps
+    _ -> assertFailure $ "expected GenTracesDone, got: " ++ showMsg msg
+
+  _ <- readMVar done1
+
+  traces <- mapM readTrace generatedPaths
+  case sequence traces of
+    Left err -> assertFailure $ "readTrace failed: " ++ err
+    Right parsed -> do
+      assertBool "read at least one trace" (not (null parsed))
+
+      (clientEnd2, mirrorEnd2) <- newMockTransport
+      done2 <- newEmptyMVar
+      _ <- forkIO $ runMirrorWithTraces mirrorEnd2 generatedPaths
+            >> putMVar done2 True
+            `catch` (\(_ :: SomeException) -> putMVar done2 False)
+
+      results <- driveMirrorTraces clientEnd2 parsed
+      let mismatches = [(i, m) | (i, (False, m)) <- results]
+      unless (null mismatches) $
+        assertFailure $ unlines $
+          ("protocol mismatches (" ++ show (length mismatches) ++ "/" ++ show (length results) ++ "):")
+          : ["  step " ++ show i ++ ": " ++ m | (i, m) <- mismatches]
+
+      ok2 <- readMVar done2
+      assertBool "replay mirror completed without exception" ok2
+
 driveMirrorTraces :: MockTransport -> [ItfTrace] -> IO [(Int, (Bool, String))]
 driveMirrorTraces clientEnd traces = do
   msg <- recvMsg clientEnd
@@ -116,7 +205,7 @@ driveMirrorTraces clientEnd traces = do
 testProtocolTraceGenerated :: TestTree
 testProtocolTraceGenerated = testCase "MirrorProtocolServer generates traces" $ do
   let cfg = ApalacheConfig
-        { specPath      = "specs/MirrorProtocolServer.tla"
+        { specPath      = "specs/MirrorProtocol.tla"
         , initPredicate = Nothing
         , nextPredicate = Nothing
         , constInit     = Nothing
@@ -145,15 +234,43 @@ testProtocolTraceGenerated = testCase "MirrorProtocolServer generates traces" $ 
 
 testMirrorFollowsProtocol :: TestTree
 testMirrorFollowsProtocol = testCase "mirror follows protocol message sequence" $ do
+  let hcCfg = ApalacheConfig
+        { specPath      = "test/specs/HourClock.tla"
+        , initPredicate = Nothing
+        , nextPredicate = Nothing
+        , constInit     = Nothing
+        }
+  genResult <- generateTraceFiles hcCfg hcTraceConfig
+  hcTracePaths <- case genResult of
+    Right (_, ps) -> pure ps
+    Left err -> assertFailure $ "pre-generate traces error: " ++ show err
+
   trace <- generateMirrorTrace
+  let steps = drop 1 (traceStates trace)
+      firstAction = case steps of
+        (s : _) -> actionTake s
+        [] -> T.empty
+
   (clientEnd, mirrorEnd) <- newMockTransport
   mv <- newEmptyMVar
-  _ <- forkIO $
-    runMirror mirrorEnd "test/specs/HourClock.tla" hcTraceConfig
-      >> putMVar mv True
-      `catch` (\(_ :: SomeException) -> putMVar mv False)
 
-  let steps = drop 1 (traceStates trace)
+  let forkMirror action = case action of
+        "ClientRegister" -> forkIO $
+          runMirror mirrorEnd "test/specs/HourClock.tla" hcTraceConfig
+            >> putMVar mv True
+            `catch` (\(_ :: SomeException) -> putMVar mv False)
+        "ClientRegisterTraces" -> forkIO $
+          runMirrorWithTraces mirrorEnd hcTracePaths
+            >> putMVar mv True
+            `catch` (\(_ :: SomeException) -> putMVar mv False)
+        "ClientRegisterGenTraces" -> forkIO $
+          runMirrorGenTraces mirrorEnd "test/specs/HourClock.tla" hcTraceConfig Nothing
+            >> putMVar mv True
+            `catch` (\(_ :: SomeException) -> putMVar mv False)
+        _ -> error $ "unexpected first action: " ++ T.unpack action
+
+  _ <- forkMirror firstAction
+
   results <- driveMirror clientEnd steps
 
   assertBool "at least one verification step" (length results >= 1)
@@ -164,10 +281,68 @@ testMirrorFollowsProtocol = testCase "mirror follows protocol message sequence" 
   _ <- tryReadMVar mv
   pure ()
 
+testMbtMirrorProtocol :: TestTree
+testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
+  let hcCfg = ApalacheConfig
+        { specPath      = "test/specs/HourClock.tla"
+        , initPredicate = Nothing
+        , nextPredicate = Nothing
+        , constInit     = Nothing
+        }
+  genResult <- generateTraceFiles hcCfg hcTraceConfig
+  hcTracePaths <- case genResult of
+    Right (_, ps) -> pure ps
+    Left err -> assertFailure $ "pre-generate traces error: " ++ show err
+
+  traces <- generateMirrorTraces
+  assertBool "at least one trace generated" (not (null traces))
+
+  let forkMirror action mirrorEnd mv = case action of
+        "ClientRegister" -> forkIO $
+          runMirror mirrorEnd "test/specs/HourClock.tla" hcTraceConfig
+            >> putMVar mv True
+            `catch` (\(_ :: SomeException) -> putMVar mv False)
+        "ClientRegisterTraces" -> forkIO $
+          runMirrorWithTraces mirrorEnd hcTracePaths
+            >> putMVar mv True
+            `catch` (\(_ :: SomeException) -> putMVar mv False)
+        "ClientRegisterGenTraces" -> forkIO $
+          runMirrorGenTraces mirrorEnd "test/specs/HourClock.tla" hcTraceConfig Nothing
+            >> putMVar mv True
+            `catch` (\(_ :: SomeException) -> putMVar mv False)
+        _ -> error $ "unexpected first action: " ++ T.unpack action
+
+  forM_ traces $ \trace -> do
+    let steps = drop 1 (traceStates trace)
+        firstAction = case steps of
+          (s : _) -> actionTake s
+          [] -> T.empty
+        isTerminal s = case Map.lookup (T.pack "mp") (stateVars s) of
+          Just (VStr p) -> p == T.pack "idle" || p == T.pack "done"
+          _ -> False
+        -- Take steps until the first terminal state, inclusive
+        cycleSteps = case break isTerminal steps of
+          (pre, t : _) -> pre ++ [t]
+          (pre, []) -> pre
+
+    (clientEnd, mirrorEnd) <- newMockTransport
+    mv <- newEmptyMVar
+    _ <- forkMirror firstAction mirrorEnd mv
+    results <- driveMirror clientEnd cycleSteps
+
+    let mismatches = [(i, desc, msg) | (i, (desc, ok, msg)) <- results, not ok]
+    unless (null mismatches) $
+      assertFailure $ unlines $
+        ("protocol mismatches in trace starting with " ++ T.unpack firstAction ++ ":")
+        : ["  step " ++ show i ++ ": " ++ desc ++ " -- " ++ msg | (i, desc, msg) <- mismatches]
+
+    _ <- tryReadMVar mv
+    pure ()
+
 generateMirrorTrace :: IO ItfTrace
 generateMirrorTrace = do
   let cfg = ApalacheConfig
-        { specPath      = "specs/MirrorProtocolServer.tla"
+        { specPath      = "specs/MirrorProtocol.tla"
         , initPredicate = Nothing
         , nextPredicate = Nothing
         , constInit     = Nothing
@@ -185,39 +360,84 @@ generateMirrorTrace = do
     Right (TracesGenerated (t : _)) -> pure t
     _ -> error $ "no traces generated: " ++ show traceRes
 
+generateMirrorTraces :: IO [ItfTrace]
+generateMirrorTraces = do
+  let cfg = ApalacheConfig
+        { specPath      = "specs/MirrorProtocol.tla"
+        , initPredicate = Nothing
+        , nextPredicate = Nothing
+        , constInit     = Nothing
+        }
+      tc = TraceGenerationConfig
+        { invariant      = T.pack "TraceComplete"
+        , lengthBound    = 20
+        , numTraces      = 100
+        , view           = Just (T.pack "MirrorView")
+        , cinit          = Nothing
+        , paramVarNames  = T.empty
+        }
+  traceRes <- generateTraces cfg tc
+  case traceRes of
+    Right (TracesGenerated ts) -> pure ts
+    _ -> error $ "no traces generated: " ++ show traceRes
+
 driveMirror :: MockTransport -> [TraceState] -> IO [(Int, (String, Bool, String))]
 driveMirror clientEnd steps = go 0 steps
   where
+    recvOrDie desc = do
+      m <- timeout 10_000_000 (recvMsg clientEnd)
+      case m of
+        Nothing -> pure $ Left $ "timeout waiting for " ++ desc
+        Just r  -> pure r
     go _ [] = pure []
     go i (st : rest) = do
       let at = actionTake st
       result <- case at of
-        "ClientSendRegister" -> do
-          sendMsg clientEnd $ Register "test/specs/HourClock.tla" hcTraceConfig
+        "ClientRegister" -> do
           pure (i, ("send Register", True, "ok"))
-        "ClientSendReport" -> do
-          sendMsg clientEnd $ ReportState dummyState
-          pure (i, ("send ReportState", True, "ok"))
-        _ | at == "MirrorSendSpecValidatedValid" || at == "MirrorSendSpecValidatedInvalid" -> do
-          msg <- recvMsg clientEnd
+        "ClientRegisterTraces" -> do
+          pure (i, ("send RegisterTraces", True, "ok"))
+        "ClientRegisterGenTraces" -> do
+          pure (i, ("send RegisterGenTraces", True, "ok"))
+        "ClientSendRegister" -> do
+          pure (i, ("send Register", True, "ok"))
+        "ClientSendRegisterTraces" -> do
+          pure (i, ("send RegisterTraces", True, "ok"))
+        "ClientSendRegisterGenTraces" -> do
+          pure (i, ("send RegisterGenTraces", True, "ok"))
+        "ClientRecvSpecValidated" -> do
+          msg <- recvOrDie "SpecValidated"
           let ok = case msg of
                 Right (SpecValidated _) -> True
                 _ -> False
           pure (i, ("recv SpecValidated", ok, showMsg msg))
-        "MirrorSendRegisterError" -> do
-          msg <- recvMsg clientEnd
+        "ClientRecvGenTracesDone" -> do
+          msg <- recvOrDie "GenTracesDone"
           let ok = case msg of
+                Right (GenTracesDone _) -> True
+                _ -> False
+          pure (i, ("recv GenTracesDone", ok, showMsg msg))
+        "ClientReport" -> do
+          sendMsg clientEnd $ ReportState dummyState
+          pure (i, ("send ReportState", True, "ok"))
+        "ClientSendReport" -> do
+          sendMsg clientEnd $ ReportState dummyState
+          pure (i, ("send ReportState", True, "ok"))
+        _ | at == "MirrorSendSpecValidatedValid" || at == "MirrorSendSpecValidatedInvalid" || at == "MirrorSendRegisterError" -> do
+          msg <- recvOrDie "SpecValidated or RegisterError"
+          let ok = case msg of
+                Right (SpecValidated _) -> True
                 Right (RegisterError _) -> True
                 _ -> False
-          pure (i, ("recv RegisterError", ok, showMsg msg))
+          pure (i, ("recv SpecValidated/RegisterError", ok, showMsg msg))
         "MirrorSendInitialState" -> do
-          msg <- recvMsg clientEnd
+          msg <- recvOrDie "InitialState"
           pure (i, ("recv InitialState", checkInitialState msg, showMsg msg))
         "MirrorSendNextStep" -> do
-          msg <- recvMsg clientEnd
+          msg <- recvOrDie "NextStep"
           pure (i, ("recv NextStep", checkNextStep msg, showMsg msg))
         "MirrorRecvReportState" -> do
-          msg <- recvMsg clientEnd
+          msg <- recvOrDie "step result"
           let ok = case msg of
                 Right StepOk             -> True
                 Right (StepMismatch _ _) -> True
@@ -226,6 +446,26 @@ driveMirror clientEnd steps = go 0 steps
           pure (i, ("recv step result", ok, showMsg msg))
         "MirrorRecvRegister" ->
           pure (i, ("skip MirrorRecvRegister (mirror internal)", True, "ok"))
+        "MirrorRecvRegisterTraces" ->
+          pure (i, ("skip MirrorRecvRegisterTraces", True, "ok"))
+        "MirrorRecvRegisterGenTraces" ->
+          pure (i, ("skip MirrorRecvRegisterGenTraces", True, "ok"))
+        "MirrorSendGenTracesDone" -> do
+          msg <- recvOrDie "GenTracesDone"
+          let ok = case msg of
+                Right (GenTracesDone _) -> True
+                _ -> False
+          pure (i, ("recv GenTracesDone", ok, showMsg msg))
+        "ClientRecvRegisterError" ->
+          pure (i, ("skip ClientRecvRegisterError", True, "ok"))
+        "ClientRecvStepOk" ->
+          pure (i, ("skip ClientRecvStepOk", True, "ok"))
+        "ClientRecvStepMismatch" ->
+          pure (i, ("skip ClientRecvStepMismatch", True, "ok"))
+        "ClientRecvAllStepsDone" ->
+          pure (i, ("skip ClientRecvAllStepsDone", True, "ok"))
+        "ClientRecvNextStep" ->
+          pure (i, ("skip ClientRecvNextStep", True, "ok"))
         "init" ->
           pure (i, ("skip init state", True, "ok"))
         _ ->

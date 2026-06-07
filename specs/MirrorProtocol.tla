@@ -37,6 +37,8 @@ VARIABLE
   mp,           \* mirror phase
   \* @type: Str;
   cp,           \* client phase
+  \* @type: Str;
+  action_taken, \* label of the action executed at this step
   \* @type: Int;
   cl_to_mir,    \* client → mirror: message tag or NO_MSG
   \* @type: Int;
@@ -52,6 +54,7 @@ ClientRegister ==
   /\ cl_to_mir = NO_MSG
   /\ cp' = "waiting_validation"
   /\ cl_to_mir' = REGISTER
+  /\ action_taken' = "ClientRegister"
   /\ UNCHANGED <<mp, mir_to_cl>>
 
 ClientRegisterTraces ==
@@ -60,6 +63,7 @@ ClientRegisterTraces ==
   /\ cl_to_mir = NO_MSG
   /\ cp' = "waiting_validation"
   /\ cl_to_mir' = REGISTER_TRACES
+  /\ action_taken' = "ClientRegisterTraces"
   /\ UNCHANGED <<mp, mir_to_cl>>
 
 ClientRegisterGenTraces ==
@@ -68,6 +72,7 @@ ClientRegisterGenTraces ==
   /\ cl_to_mir = NO_MSG
   /\ cp' = "waiting_gen"
   /\ cl_to_mir' = REGISTER_TRACE_GEN
+  /\ action_taken' = "ClientRegisterGenTraces"
   /\ UNCHANGED <<mp, mir_to_cl>>
 
 ClientReport ==
@@ -75,6 +80,7 @@ ClientReport ==
   /\ cl_to_mir = NO_MSG
   /\ cp' = "waiting_ack"
   /\ cl_to_mir' = REPORT_STATE
+  /\ action_taken' = "ClientReport"
   /\ UNCHANGED <<mp, mir_to_cl>>
 
 \* -----------------------------------------------------------------------------
@@ -86,6 +92,7 @@ ClientRecvSpecValidated ==
   /\ cp = "waiting_validation"
   /\ cp' = "waiting_init"
   /\ mir_to_cl' = NO_MSG
+  /\ action_taken' = "ClientRecvSpecValidated"
   /\ UNCHANGED <<mp, cl_to_mir>>
 
 ClientRecvGenTracesDone ==
@@ -93,6 +100,7 @@ ClientRecvGenTracesDone ==
   /\ cp = "waiting_gen"
   /\ cp' = "idle"
   /\ mir_to_cl' = NO_MSG
+  /\ action_taken' = "ClientRecvGenTracesDone"
   /\ UNCHANGED <<mp, cl_to_mir>>
 
 ClientRecvInitialState ==
@@ -100,6 +108,7 @@ ClientRecvInitialState ==
   /\ cp = "waiting_init"
   /\ cp' = "waiting_action"
   /\ mir_to_cl' = NO_MSG
+  /\ action_taken' = "ClientRecvInitialState"
   /\ UNCHANGED <<mp, cl_to_mir>>
 
 ClientRecvNextStep ==
@@ -107,21 +116,22 @@ ClientRecvNextStep ==
   /\ cp = "waiting_ack"
   /\ cp' = "waiting_action"
   /\ mir_to_cl' = NO_MSG
+  /\ action_taken' = "ClientRecvNextStep"
   /\ UNCHANGED <<mp, cl_to_mir>>
 
 ClientRecvStepOk ==
   /\ mir_to_cl = STEP_OK
   /\ cp = "waiting_ack"
-  \* After step_ok, client stays in waiting_ack:
-  \* the mirror will either send next_step or all_steps_done next.
   /\ cp' = "waiting_ack"
   /\ mir_to_cl' = NO_MSG
+  /\ action_taken' = "ClientRecvStepOk"
   /\ UNCHANGED <<mp, cl_to_mir>>
 
 ClientRecvStepMismatch ==
   /\ mir_to_cl = STEP_MISMATCH
   /\ cp' = "done"
   /\ mir_to_cl' = NO_MSG
+  /\ action_taken' = "ClientRecvStepMismatch"
   /\ UNCHANGED <<mp, cl_to_mir>>
 
 ClientRecvAllStepsDone ==
@@ -129,12 +139,14 @@ ClientRecvAllStepsDone ==
   /\ cp = "waiting_ack"
   /\ cp' = "done"
   /\ mir_to_cl' = NO_MSG
+  /\ action_taken' = "ClientRecvAllStepsDone"
   /\ UNCHANGED <<mp, cl_to_mir>>
 
 ClientRecvProtocolError ==
   /\ mir_to_cl = PROTOCOL_ERROR
   /\ cp' = "done"
   /\ mir_to_cl' = NO_MSG
+  /\ action_taken' = "ClientRecvProtocolError"
   /\ UNCHANGED <<mp, cl_to_mir>>
 
 ClientRecvRegisterError ==
@@ -142,6 +154,7 @@ ClientRecvRegisterError ==
   /\ cp = "waiting_validation"
   /\ cp' = "done"
   /\ mir_to_cl' = NO_MSG
+  /\ action_taken' = "ClientRecvRegisterError"
   /\ UNCHANGED <<mp, cl_to_mir>>
 
 \* -----------------------------------------------------------------------------
@@ -153,6 +166,7 @@ MirrorRecvRegister ==
   /\ mp = "idle"
   /\ mp' = "validating"
   /\ cl_to_mir' = NO_MSG
+  /\ action_taken' = "MirrorRecvRegister"
   /\ UNCHANGED <<cp, mir_to_cl>>
 
 MirrorRecvRegisterTraces ==
@@ -161,6 +175,7 @@ MirrorRecvRegisterTraces ==
   /\ mp' = "ready"
   /\ cl_to_mir' = NO_MSG
   /\ mir_to_cl' = SPEC_VALIDATED
+  /\ action_taken' = "MirrorRecvRegisterTraces"
   /\ UNCHANGED cp
 
 MirrorRecvRegisterGenTraces ==
@@ -168,6 +183,7 @@ MirrorRecvRegisterGenTraces ==
   /\ mp = "idle"
   /\ mp' = "generating"
   /\ cl_to_mir' = NO_MSG
+  /\ action_taken' = "MirrorRecvRegisterGenTraces"
   /\ UNCHANGED <<cp, mir_to_cl>>
 
 \* Mirror receives ReportState.
@@ -177,6 +193,7 @@ MirrorRecvReportState ==
   /\ cl_to_mir = REPORT_STATE
   /\ mp = "stepping"
   /\ cl_to_mir' = NO_MSG
+  /\ action_taken' = "MirrorRecvReportState"
   /\ \/ /\ mp' = "stepping"            \* match, more steps remain
         /\ mir_to_cl' = STEP_OK         \* queued; NextStep sent separately
      \/ /\ mp' = "stepping"            \* match, last step
@@ -194,6 +211,7 @@ MirrorSendGenTracesDone ==
   /\ mir_to_cl = NO_MSG
   /\ mp' = "idle"
   /\ mir_to_cl' = GEN_TRACES_DONE
+  /\ action_taken' = "MirrorSendGenTracesDone"
   /\ UNCHANGED <<cp, cl_to_mir>>
 
 MirrorSendSpecValidatedValid ==
@@ -201,6 +219,7 @@ MirrorSendSpecValidatedValid ==
   /\ mir_to_cl = NO_MSG
   /\ mp' = "ready"
   /\ mir_to_cl' = SPEC_VALIDATED
+  /\ action_taken' = "MirrorSendSpecValidatedValid"
   /\ UNCHANGED <<cp, cl_to_mir>>
 
 MirrorSendSpecValidatedInvalid ==
@@ -208,6 +227,7 @@ MirrorSendSpecValidatedInvalid ==
   /\ mir_to_cl = NO_MSG
   /\ mp' = "done"
   /\ mir_to_cl' = SPEC_VALIDATED
+  /\ action_taken' = "MirrorSendSpecValidatedInvalid"
   /\ UNCHANGED <<cp, cl_to_mir>>
 
 MirrorSendRegisterError ==
@@ -215,6 +235,7 @@ MirrorSendRegisterError ==
   /\ mir_to_cl = NO_MSG
   /\ mp' = "done"
   /\ mir_to_cl' = REGISTER_ERROR
+  /\ action_taken' = "MirrorSendRegisterError"
   /\ UNCHANGED <<cp, cl_to_mir>>
 
 MirrorSendInitialState ==
@@ -222,6 +243,7 @@ MirrorSendInitialState ==
   /\ mir_to_cl = NO_MSG
   /\ mp' = "stepping"
   /\ mir_to_cl' = INITIAL_STATE
+  /\ action_taken' = "MirrorSendInitialState"
   /\ UNCHANGED <<cp, cl_to_mir>>
 
 \* After sending step_ok, mirror sends next_step if more steps remain.
@@ -230,6 +252,7 @@ MirrorSendNextStep ==
   /\ mp = "stepping"
   /\ mp' = "stepping"
   /\ mir_to_cl' = NEXT_STEP
+  /\ action_taken' = "MirrorSendNextStep"
   /\ UNCHANGED <<cp, cl_to_mir>>
 
 \* -----------------------------------------------------------------------------
@@ -239,6 +262,7 @@ MirrorSendNextStep ==
 Init ==
   /\ mp = "idle"
   /\ cp = "idle"
+  /\ action_taken = "init"
   /\ cl_to_mir = NO_MSG
   /\ mir_to_cl = NO_MSG
 
@@ -275,7 +299,7 @@ Next ==
 \* Specification
 \* -----------------------------------------------------------------------------
 
-Spec == Init /\ [][Next]_<<mp, cp, cl_to_mir, mir_to_cl>>
+Spec == Init /\ [][Next]_<<mp, cp, action_taken, cl_to_mir, mir_to_cl>>
 
 \* -----------------------------------------------------------------------------
 \* Invariants
@@ -292,5 +316,13 @@ NoProtocolError ==
 
 Inv == PhaseOk /\
        NoProtocolError
+
+\* Force trace generation: Apalache finds counterexamples
+\* showing paths from idle to done.
+TraceComplete ==
+  cp /= "done"
+
+\* View that captures protocol-relevant state for trace inspection.
+MirrorView == <<mp, cp, action_taken, cl_to_mir, mir_to_cl>>
 
 ==============================================================================

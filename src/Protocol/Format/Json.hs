@@ -20,6 +20,12 @@ instance ToJSON ClientMessage where
     [ fromString "proto_step" .= T.pack "register_traces"
     , fromString "itfTracePaths" .= traces
     ]
+  toJSON (RegisterGenTraces path config dest) = object
+    [ fromString "proto_step" .= T.pack "register_trace_gen"
+    , fromString "specPath" .= path
+    , fromString "traceConfig" .= config
+    , fromString "destPath" .= dest
+    ]
   toJSON (ReportState state) = object
     [ fromString "proto_step" .= T.pack "report_state"
     , fromString "state" .= state
@@ -33,6 +39,10 @@ instance FromJSON ClientMessage where
           Register <$> o .: fromString "specPath" <*> o .: fromString "traceConfig"
       t | t == T.pack "register_traces" ->
           RegisterTraces <$> o .: fromString "itfTracePaths"
+      t | t == T.pack "register_trace_gen" ->
+          RegisterGenTraces <$> o .: fromString "specPath"
+                            <*> o .: fromString "traceConfig"
+                            <*> o .:? fromString "destPath" .!= Nothing
       t | t == T.pack "report_state" ->
           ReportState <$> o .: fromString "state"
       _ ->
@@ -64,6 +74,10 @@ instance ToJSON MirrorMessage where
   toJSON AllStepsDone = object
     [ fromString "proto_step" .= T.pack "all_steps_done"
     ]
+  toJSON (GenTracesDone paths) = object
+    [ fromString "proto_step" .= T.pack "gen_traces_done"
+    , fromString "itfTracePaths" .= paths
+    ]
   toJSON (RegisterError err) = object
     [ fromString "proto_step" .= T.pack "register_error"
     , fromString "error" .= err
@@ -89,6 +103,8 @@ instance FromJSON MirrorMessage where
           StepMismatch <$> o .: fromString "expected" <*> o .: fromString "actual"
       t | t == T.pack "all_steps_done" ->
           pure AllStepsDone
+      t | t == T.pack "gen_traces_done" ->
+          GenTracesDone <$> o .: fromString "itfTracePaths"
       t | t == T.pack "protocol_error" ->
           ProtocolError <$> o .: fromString "error"
       t | t == T.pack "register_error" ->

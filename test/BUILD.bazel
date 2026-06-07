@@ -7,7 +7,7 @@ haskell_test(
         exclude = ["specs/**"],
     ),
     ghcopts = ["-Wall", "-XGHC2024"],
-    data = glob(["specs/*.tla"]) + ["//:specs/MirrorProtocolServer.tla"],
+    data = glob(["specs/*.tla"]) + ["//:specs/MirrorProtocol.tla"],
     deps = [
         "//src:ModelMirrors",
         "//:base",

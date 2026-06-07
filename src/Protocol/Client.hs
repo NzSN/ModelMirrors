@@ -2,6 +2,7 @@ module Protocol.Client
   ( Client (..)
   , runClient
   , runClientWithTraces
+  , runClientGenTraces
   , cannedClient
   , fixedClient
   , hourClockClient
@@ -43,6 +44,16 @@ runClientWithTraces client traces = do
     Right (RegisterError e)               -> pure (Left e)
     Right (ProtocolError e)               -> pure (Left e)
     Right _                                -> pure (Left (T.pack "Unexpected message: expected SpecValidated"))
+
+runClientGenTraces :: Transport t => Client t -> FilePath -> TraceGenerationConfig -> Maybe FilePath -> IO (Either Text ())
+runClientGenTraces client specPath config destPath = do
+  sendMsg (clientTransport client) (RegisterGenTraces specPath config destPath)
+  recvMsg (clientTransport client) >>= \case
+    Left err                               -> pure (Left (T.pack err))
+    Right (GenTracesDone _)                -> pure (Right ())
+    Right (RegisterError e)                -> pure (Left e)
+    Right (ProtocolError e)                -> pure (Left e)
+    Right _                                -> pure (Left (T.pack "Unexpected message: expected GenTracesDone"))
 
 stepLoop :: Transport t => Client t -> IO (Either Text ())
 stepLoop client = do

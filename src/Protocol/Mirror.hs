@@ -1,9 +1,10 @@
 module Protocol.Mirror
   ( runMirror
   , runMirrorWithTraces
+  , runMirrorGenTraces
   ) where
 
-import Apalache.Command (generateTraces)
+import Apalache.Command (generateTraceFiles, generateTraces)
 import Apalache.Trace (findTraceFiles, readTrace)
 import Apalache.Types
     ( ApalacheConfig (..)
@@ -22,7 +23,8 @@ import Engine.Types (Step (..), StepCommand (..), StateDiff (..))
 import Protocol.Core (MirrorMessage (..))
 import Protocol.Format.Json ()
 import Protocol.Transport.Core (Transport, sendMsg)
-import System.Directory (doesDirectoryExist)
+import System.Directory (createDirectoryIfMissing, copyFile, doesDirectoryExist)
+import System.FilePath (takeFileName, (</>))
 
 runMirror :: Transport t => t -> FilePath -> TraceGenerationConfig -> IO ()
 runMirror transport specPath config = do
@@ -56,6 +58,21 @@ runMirrorWithTraces transport tracePaths = do
     expandPath p = do
       isDir <- doesDirectoryExist p
       if isDir then findTraceFiles p else pure [p]
+
+runMirrorGenTraces :: Transport t => t -> FilePath -> TraceGenerationConfig -> Maybe FilePath -> IO ()
+runMirrorGenTraces transport specPath config destPath = do
+  let cfg = ApalacheConfig specPath Nothing Nothing (cinit config)
+  result <- generateTraceFiles cfg config
+  case result of
+    Left err -> sendMsg transport (RegisterError (unApalacheError err))
+    Right (outDir, paths) -> do
+      finalPaths <- case destPath of
+        Just d | d /= outDir -> do
+          createDirectoryIfMissing True d
+          forM_ paths $ \p -> copyFile p (d </> takeFileName p)
+          pure $ map (\p -> d </> takeFileName p) paths
+        _ -> pure paths
+      sendMsg transport (GenTracesDone finalPaths)
 
 replaySteps :: Transport t => t -> StateDriver IO -> ItfTrace -> IO ()
 replaySteps transport driver trace = do

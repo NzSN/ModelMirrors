@@ -1,6 +1,7 @@
 module Apalache.Command
   ( validateSpec
   , generateTraces
+  , generateTraceFiles
   ) where
 
 import Apalache.Types
@@ -11,7 +12,7 @@ import Apalache.Types
   , ApalacheError (..)
   , applyParamVars
   )
-import Apalache.Trace (findTraces)
+import Apalache.Trace (findTraceFiles, findTraces)
 
 import qualified Data.Text as T
 import System.Directory (doesFileExist)
@@ -74,6 +75,21 @@ parseOutputDir = go . lines
     go (l : ls) = case break (== ':') l of
       ("Output directory", ':' : ' ' : rest) -> Just rest
       _ -> go ls
+
+generateTraceFiles :: ApalacheConfig -> TraceGenerationConfig -> IO (Either ApalacheError (FilePath, [FilePath]))
+generateTraceFiles cfg tc = do
+  bin <- apalacheBin
+  (exit, out, err) <- readProcessWithExitCode bin (traceArgs cfg tc) ""
+  case exit of
+    ExitFailure 255 ->
+      pure $ Left $ ApalacheError (T.pack (out ++ err))
+    _ -> do
+      case parseOutputDir (out ++ err) of
+        Nothing ->
+          pure $ Left $ ApalacheError (T.pack "Could not determine output directory from Apalache output")
+        Just outDir -> do
+          paths <- findTraceFiles outDir
+          pure $ Right (outDir, paths)
 
 tcArgs :: ApalacheConfig -> [String]
 tcArgs cfg =

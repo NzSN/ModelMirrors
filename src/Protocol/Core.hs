@@ -11,6 +11,7 @@ import Data.Text (Text)
 data ClientMessage
   = Register !FilePath !TraceGenerationConfig
   | RegisterTraces ![FilePath]
+  | RegisterGenTraces !FilePath !TraceGenerationConfig !(Maybe FilePath)
   | ReportState !(Map Text Value)
   deriving (Show, Eq)
 
@@ -21,6 +22,7 @@ data MirrorMessage
   | StepOk
   | StepMismatch !(Map Text Value) !(Map Text Value)
   | AllStepsDone
+  | GenTracesDone ![FilePath]
   | RegisterError !Text
   | ProtocolError !Text
   deriving (Show, Eq)
