@@ -322,6 +322,10 @@ Inv == PhaseOk /\
 TraceComplete ==
   cp /= "done"
 
+\* Force stepping path through ClientReport and mirror response.
+TraceStepping ==
+  mir_to_cl /= STEP_OK
+
 \* View that captures protocol-relevant state for trace inspection.
 MirrorView == <<mp, cp, action_taken, cl_to_mir, mir_to_cl>>
 

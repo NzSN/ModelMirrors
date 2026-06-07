@@ -2,6 +2,7 @@ module Protocol.Mirror
   ( runMirror
   , runMirrorWithTraces
   , runMirrorGenTraces
+  , run
   ) where
 
 import Apalache.Command (generateTraceFiles, generateTraces)
@@ -20,11 +21,21 @@ import Engine.Core (diffState, traceSteps)
 import Engine.Interactive (makeTransportDriver)
 import Engine.Replay (StateDriver (..))
 import Engine.Types (Step (..), StepCommand (..), StateDiff (..))
-import Protocol.Core (MirrorMessage (..))
+import Protocol.Core (ClientMessage (..), MirrorMessage (..))
 import Protocol.Format.Json ()
-import Protocol.Transport.Core (Transport, sendMsg)
+import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
 import System.Directory (createDirectoryIfMissing, copyFile, doesDirectoryExist)
 import System.FilePath (takeFileName, (</>))
+
+run :: Transport t => t -> IO ()
+run transport = do
+  msg <- recvMsg transport
+  case msg of
+    Right (Register specPath config)                   -> runMirror transport specPath config
+    Right (RegisterTraces traces)                       -> runMirrorWithTraces transport traces
+    Right (RegisterGenTraces specPath config destPath)  -> runMirrorGenTraces transport specPath config destPath
+    Right _ -> sendMsg transport (ProtocolError (T.pack "Expected Register message"))
+    Left err -> sendMsg transport (ProtocolError (T.pack err))
 
 runMirror :: Transport t => t -> FilePath -> TraceGenerationConfig -> IO ()
 runMirror transport specPath config = do
