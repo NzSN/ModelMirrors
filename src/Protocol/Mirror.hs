@@ -1,5 +1,9 @@
 module Protocol.Mirror
-  ( runMirror
+  ( MirrorStep (..)
+  , mirrorStepActionName
+  , normalizeMirrorSteps
+  , replaySteps
+  , runMirror
   , runMirrorWithTraces
   , runMirrorGenTraces
   , run
@@ -14,9 +18,12 @@ import Apalache.Types
     , TraceGenerationConfig (..)
     , TraceGenerationResult (..)
     , ValidateResult (..)
+    , Value
     )
-import Control.Monad (forM_)
-import Data.Text qualified as T
+import Control.Monad (forM, forM_)
+import Data.Map.Strict (Map)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Engine.Core (diffState, traceSteps)
 import Engine.Interactive (makeTransportDriver)
 import Engine.Replay (StateDriver (..))
@@ -27,55 +34,116 @@ import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
 import System.Directory (createDirectoryIfMissing, copyFile, doesDirectoryExist)
 import System.FilePath (takeFileName, (</>))
 
-run :: Transport t => t -> IO ()
+data MirrorStep
+  = MirrorRecvRegister !FilePath !TraceGenerationConfig
+  | MirrorRecvRegisterTraces ![FilePath]
+  | MirrorRecvRegisterGenTraces !FilePath !TraceGenerationConfig !(Maybe FilePath)
+  | MirrorRecvReportState !Int !Text
+  | MirrorSendGenTracesDone ![FilePath]
+  | MirrorSendSpecValidatedValid
+  | MirrorSendSpecValidatedInvalid !Text
+  | MirrorSendRegisterError !Text
+  | MirrorSendProtocolError !Text
+  | MirrorSendInitialState !Text !(Map Text Value)
+  | MirrorSendNextStep !Text !(Map Text Value)
+  | MirrorSendStepOk !Int
+  | MirrorSendStepMismatch !Int !StateDiff
+  | MirrorSendAllStepsDone
+  deriving (Show, Eq)
+
+mirrorStepActionName :: MirrorStep -> Text
+mirrorStepActionName = \case
+  MirrorRecvRegister{}            -> T.pack "MirrorRecvRegister"
+  MirrorRecvRegisterTraces{}      -> T.pack "MirrorRecvRegisterTraces"
+  MirrorRecvRegisterGenTraces{}   -> T.pack "MirrorRecvRegisterGenTraces"
+  MirrorRecvReportState{}         -> T.pack "MirrorRecvReportState"
+  MirrorSendGenTracesDone{}       -> T.pack "MirrorSendGenTracesDone"
+  MirrorSendSpecValidatedValid    -> T.pack "MirrorSendSpecValidatedValid"
+  MirrorSendSpecValidatedInvalid{}-> T.pack "MirrorSendSpecValidatedInvalid"
+  MirrorSendRegisterError{}       -> T.pack "MirrorSendRegisterError"
+  MirrorSendProtocolError{}       -> T.pack "MirrorSendProtocolError"
+  MirrorSendInitialState{}        -> T.pack "MirrorSendInitialState"
+  MirrorSendNextStep{}            -> T.pack "MirrorSendNextStep"
+  MirrorSendStepOk{}              -> T.pack "MirrorSendStepOk"
+  MirrorSendStepMismatch{}        -> T.pack "MirrorSendStepMismatch"
+  MirrorSendAllStepsDone          -> T.pack "MirrorSendAllStepsDone"
+
+normalizeMirrorSteps :: [MirrorStep] -> [Text]
+normalizeMirrorSteps = go
+  where
+    go [] = []
+    go (MirrorRecvReportState i _ : MirrorSendStepOk j : rest) | i == j =
+      T.pack "MirrorRecvReportState" : go rest
+    go (MirrorRecvReportState i _ : MirrorSendStepMismatch j _ : rest) | i == j =
+      T.pack "MirrorRecvReportState" : go rest
+    go (MirrorSendAllStepsDone : rest) = go rest
+    go (step : rest) = mirrorStepActionName step : go rest
+
+run :: Transport t => t -> IO [MirrorStep]
 run transport = do
   msg <- recvMsg transport
   case msg of
-    Right (Register specPath config)                   -> runMirror transport specPath config
-    Right (RegisterTraces traces)                       -> runMirrorWithTraces transport traces
-    Right (RegisterGenTraces specPath config destPath)  -> runMirrorGenTraces transport specPath config destPath
-    Right _ -> sendMsg transport (ProtocolError (T.pack "Expected Register message"))
-    Left err -> sendMsg transport (ProtocolError (T.pack err))
+    Right (Register specPath config) -> do
+      steps <- runMirror transport specPath config
+      pure (MirrorRecvRegister specPath config : steps)
+    Right (RegisterTraces traces) -> do
+      steps <- runMirrorWithTraces transport traces
+      pure (MirrorRecvRegisterTraces traces : steps)
+    Right (RegisterGenTraces specPath config destPath) -> do
+      steps <- runMirrorGenTraces transport specPath config destPath
+      pure (MirrorRecvRegisterGenTraces specPath config destPath : steps)
+    Right _ -> do
+      sendMsg transport (ProtocolError (T.pack "Expected Register message"))
+      pure [MirrorSendProtocolError (T.pack "Expected Register message")]
+    Left err -> do
+      sendMsg transport (ProtocolError (T.pack err))
+      pure [MirrorSendProtocolError (T.pack err)]
 
-runMirror :: Transport t => t -> FilePath -> TraceGenerationConfig -> IO ()
+runMirror :: Transport t => t -> FilePath -> TraceGenerationConfig -> IO [MirrorStep]
 runMirror transport specPath config = do
   let cfg = ApalacheConfig specPath Nothing Nothing (cinit config)
   traceRes <- generateTraces cfg config
   case traceRes of
-    Left err ->
+    Left err -> do
       sendMsg transport (RegisterError (unApalacheError err))
+      pure [MirrorSendRegisterError (unApalacheError err)]
     Right (TracesGenerated traces) -> do
       sendMsg transport (SpecValidated SpecValid)
       let driver = makeTransportDriver transport
-      forM_ traces $ \trace ->
-        replaySteps transport driver trace
+      stepResults <- concat <$> forM traces (replaySteps transport driver)
       sendMsg transport AllStepsDone
-    Right (GenerationError e) ->
+      pure (MirrorSendSpecValidatedValid : stepResults ++ [MirrorSendAllStepsDone])
+    Right (GenerationError e) -> do
       sendMsg transport (ProtocolError e)
+      pure [MirrorSendProtocolError e]
 
-runMirrorWithTraces :: Transport t => t -> [FilePath] -> IO ()
+runMirrorWithTraces :: Transport t => t -> [FilePath] -> IO [MirrorStep]
 runMirrorWithTraces transport tracePaths = do
   expanded <- concat <$> mapM expandPath tracePaths
   traces <- mapM readTrace expanded
   case sequence traces of
-    Left err -> sendMsg transport (RegisterError (T.pack err))
+    Left err -> do
+      sendMsg transport (RegisterError (T.pack err))
+      pure [MirrorSendRegisterError (T.pack err)]
     Right parsed -> do
       sendMsg transport (SpecValidated SpecValid)
       let driver = makeTransportDriver transport
-      forM_ parsed $ \trace ->
-        replaySteps transport driver trace
+      stepResults <- concat <$> forM parsed (replaySteps transport driver)
       sendMsg transport AllStepsDone
+      pure (MirrorSendSpecValidatedValid : stepResults ++ [MirrorSendAllStepsDone])
   where
     expandPath p = do
       isDir <- doesDirectoryExist p
       if isDir then findTraceFiles p else pure [p]
 
-runMirrorGenTraces :: Transport t => t -> FilePath -> TraceGenerationConfig -> Maybe FilePath -> IO ()
+runMirrorGenTraces :: Transport t => t -> FilePath -> TraceGenerationConfig -> Maybe FilePath -> IO [MirrorStep]
 runMirrorGenTraces transport specPath config destPath = do
   let cfg = ApalacheConfig specPath Nothing Nothing (cinit config)
   result <- generateTraceFiles cfg config
   case result of
-    Left err -> sendMsg transport (RegisterError (unApalacheError err))
+    Left err -> do
+      sendMsg transport (RegisterError (unApalacheError err))
+      pure [MirrorSendRegisterError (unApalacheError err)]
     Right (outDir, paths) -> do
       finalPaths <- case destPath of
         Just d | d /= outDir -> do
@@ -84,23 +152,31 @@ runMirrorGenTraces transport specPath config destPath = do
           pure $ map (\p -> d </> takeFileName p) paths
         _ -> pure paths
       sendMsg transport (GenTracesDone finalPaths)
+      pure [MirrorSendGenTracesDone finalPaths]
 
-replaySteps :: Transport t => t -> StateDriver IO -> ItfTrace -> IO ()
+replaySteps :: Transport t => t -> StateDriver IO -> ItfTrace -> IO [MirrorStep]
 replaySteps transport driver trace = do
   let steps = traceSteps trace
   go driver steps
   where
-    go _ [] = pure ()
+    go _ [] = pure []
     go (StateDriver report) (step : rest) = do
       let action = stepAct step
-          cmd = if stepIdx step == 0
+          sidx = stepIdx step
+          cmd = if sidx == 0
                 then CmdInitial action (stepVars step)
                 else CmdNextStep action (stepParams step)
+          sendStep = if sidx == 0
+                     then MirrorSendInitialState action (stepVars step)
+                     else MirrorSendNextStep action (stepParams step)
       actual <- report cmd
       let diff = diffState (stepVars step) actual
+          recvStep = MirrorRecvReportState sidx action
       case diff of
         StatesMatch -> do
           sendMsg transport StepOk
-          go (StateDriver report) rest
+          restSteps <- go (StateDriver report) rest
+          pure (sendStep : recvStep : MirrorSendStepOk sidx : restSteps)
         StateMismatch expected actualDiffs _ -> do
           sendMsg transport (StepMismatch expected actualDiffs)
+          pure (sendStep : recvStep : MirrorSendStepMismatch sidx diff : [])

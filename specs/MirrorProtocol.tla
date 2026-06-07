@@ -249,7 +249,9 @@ MirrorSendInitialState ==
 \* After sending step_ok, mirror sends next_step if more steps remain.
 MirrorSendNextStep ==
   /\ mir_to_cl = NO_MSG
+  /\ cl_to_mir = NO_MSG
   /\ mp = "stepping"
+  /\ cp = "waiting_ack"
   /\ mp' = "stepping"
   /\ mir_to_cl' = NEXT_STEP
   /\ action_taken' = "MirrorSendNextStep"

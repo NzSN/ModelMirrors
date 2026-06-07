@@ -144,7 +144,8 @@ test-suite ModelMirrors-test
         ClientSpec,
         EngineSpec,
         MainSpec,
-        MirrorProtocolSpec
+        MirrorProtocolSpec,
+        MirrorStepSpec
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

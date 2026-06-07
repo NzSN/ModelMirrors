@@ -4,4 +4,4 @@ import Protocol.Mirror (run)
 import Protocol.Transport.Stdio (StdioTransport (..))
 
 main :: IO ()
-main = run StdioTransport
+main = run StdioTransport >> pure ()
