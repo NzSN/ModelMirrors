@@ -15,6 +15,9 @@ data ApalacheConfig = ApalacheConfig
   , initPredicate :: !(Maybe Text)
   , nextPredicate :: !(Maybe Text)
   , constInit     :: !(Maybe Text)
+  , invariant     :: !Text
+  , lengthBound   :: !Int
+  , paramVarNames :: !Text
   } deriving (Show, Eq)
 
 data ValidateResult
@@ -31,34 +34,44 @@ instance FromJSON ValidateResult where
     A.String t | t == T.pack "valid" -> pure SpecValid
     _ -> withObject "ValidateResult" (\o -> SpecInvalid <$> o .: fromString "invalid") v
 
+instance ToJSON ApalacheConfig where
+  toJSON c = object
+    [ fromString "specPath" .= specPath c
+    , fromString "initPredicate" .= initPredicate c
+    , fromString "nextPredicate" .= nextPredicate c
+    , fromString "constInit" .= constInit c
+    , fromString "invariant" .= invariant c
+    , fromString "lengthBound" .= lengthBound c
+    , fromString "paramVarNames" .= paramVarNames c
+    ]
+
+instance FromJSON ApalacheConfig where
+  parseJSON = withObject "ApalacheConfig" $ \o ->
+    ApalacheConfig
+      <$> o .: fromString "specPath"
+      <*> o .:? fromString "initPredicate" .!= Nothing
+      <*> o .:? fromString "nextPredicate" .!= Nothing
+      <*> o .:? fromString "constInit" .!= Nothing
+      <*> o .:? fromString "invariant" .!= T.empty
+      <*> o .:? fromString "lengthBound" .!= 10
+      <*> o .:? fromString "paramVarNames" .!= T.empty
+
 data TraceGenerationConfig = TraceGenerationConfig
-  { invariant   :: !Text
-  , lengthBound :: !Int
-  , numTraces   :: !Int
+  { numTraces   :: !Int
   , view        :: !(Maybe Text)
-  , cinit       :: !(Maybe Text)
-  , paramVarNames :: !Text
   } deriving (Show, Eq)
 
 instance ToJSON TraceGenerationConfig where
   toJSON c = object
-    [ fromString "invariant" .= invariant c
-    , fromString "lengthBound" .= lengthBound c
-    , fromString "numTraces" .= numTraces c
+    [ fromString "numTraces" .= numTraces c
     , fromString "view" .= view c
-    , fromString "cinit" .= cinit c
-    , fromString "paramVars" .= paramVarNames c
     ]
 
 instance FromJSON TraceGenerationConfig where
   parseJSON = withObject "TraceGenerationConfig" $ \o ->
     TraceGenerationConfig
-      <$> o .: fromString "invariant"
-      <*> o .: fromString "lengthBound"
-      <*> o .: fromString "numTraces"
+      <$> o .:? fromString "numTraces" .!= 1
       <*> o .:? fromString "view" .!= Nothing
-      <*> o .:? fromString "cinit" .!= Nothing
-      <*> o .:? fromString "paramVars" .!= T.empty
 
 data TraceGenerationResult
   = TracesGenerated ![ItfTrace]

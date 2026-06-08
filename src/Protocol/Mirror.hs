@@ -35,9 +35,9 @@ import System.Directory (createDirectoryIfMissing, copyFile, doesDirectoryExist)
 import System.FilePath (takeFileName, (</>))
 
 data MirrorStep
-  = MirrorRecvRegister !FilePath !TraceGenerationConfig
+  = MirrorRecvRegister !ApalacheConfig !TraceGenerationConfig
   | MirrorRecvRegisterTraces ![FilePath]
-  | MirrorRecvRegisterGenTraces !FilePath !TraceGenerationConfig !(Maybe FilePath)
+  | MirrorRecvRegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath)
   | MirrorRecvReportState !Int !Text
   | MirrorSendGenTracesDone ![FilePath]
   | MirrorSendSpecValidatedValid
@@ -83,15 +83,15 @@ run :: Transport t => t -> IO [MirrorStep]
 run transport = do
   msg <- recvMsg transport
   case msg of
-    Right (Register specPath config) -> do
-      steps <- runMirror transport specPath config
-      pure (MirrorRecvRegister specPath config : steps)
+    Right (Register apCfg tc) -> do
+      steps <- runMirror transport apCfg tc
+      pure (MirrorRecvRegister apCfg tc : steps)
     Right (RegisterTraces traces) -> do
       steps <- runMirrorWithTraces transport traces
       pure (MirrorRecvRegisterTraces traces : steps)
-    Right (RegisterGenTraces specPath config destPath) -> do
-      steps <- runMirrorGenTraces transport specPath config destPath
-      pure (MirrorRecvRegisterGenTraces specPath config destPath : steps)
+    Right (RegisterGenTraces apCfg tc destPath) -> do
+      steps <- runMirrorGenTraces transport apCfg tc destPath
+      pure (MirrorRecvRegisterGenTraces apCfg tc destPath : steps)
     Right _ -> do
       sendMsg transport (ProtocolError (T.pack "Expected Register message"))
       pure [MirrorSendProtocolError (T.pack "Expected Register message")]
@@ -99,10 +99,9 @@ run transport = do
       sendMsg transport (ProtocolError (T.pack err))
       pure [MirrorSendProtocolError (T.pack err)]
 
-runMirror :: Transport t => t -> FilePath -> TraceGenerationConfig -> IO [MirrorStep]
-runMirror transport specPath config = do
-  let cfg = ApalacheConfig specPath Nothing Nothing (cinit config)
-  traceRes <- generateTraces cfg config
+runMirror :: Transport t => t -> ApalacheConfig -> TraceGenerationConfig -> IO [MirrorStep]
+runMirror transport cfg tc = do
+  traceRes <- generateTraces cfg tc
   case traceRes of
     Left err -> do
       sendMsg transport (RegisterError (unApalacheError err))
@@ -136,10 +135,9 @@ runMirrorWithTraces transport tracePaths = do
       isDir <- doesDirectoryExist p
       if isDir then findTraceFiles p else pure [p]
 
-runMirrorGenTraces :: Transport t => t -> FilePath -> TraceGenerationConfig -> Maybe FilePath -> IO [MirrorStep]
-runMirrorGenTraces transport specPath config destPath = do
-  let cfg = ApalacheConfig specPath Nothing Nothing (cinit config)
-  result <- generateTraceFiles cfg config
+runMirrorGenTraces :: Transport t => t -> ApalacheConfig -> TraceGenerationConfig -> Maybe FilePath -> IO [MirrorStep]
+runMirrorGenTraces transport cfg tc destPath = do
+  result <- generateTraceFiles cfg tc
   case result of
     Left err -> do
       sendMsg transport (RegisterError (unApalacheError err))

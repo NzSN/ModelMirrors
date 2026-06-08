@@ -27,16 +27,15 @@ config = ApalacheConfig
   , initPredicate = Nothing
   , nextPredicate = Nothing
   , constInit     = Nothing
+  , invariant     = T.pack "TraceComplete"
+  , lengthBound   = 13
+  , paramVarNames = T.empty
   }
 
 traceConfig :: TraceGenerationConfig
 traceConfig = TraceGenerationConfig
-  { invariant      = T.pack "TraceComplete"
-  , lengthBound    = 13
-  , numTraces      = 1
-  , view           = Nothing
-  , cinit          = Nothing
-  , paramVarNames  = T.empty
+  { numTraces = 1
+  , view      = Nothing
   }
 
 testValidateSpec :: TestTree

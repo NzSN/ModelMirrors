@@ -38,10 +38,10 @@ spec = testGroup "ClientSpec"
 awaitResult :: MVar (Either Text ()) -> IO (Either Text ())
 awaitResult = takeMVar
 
-forkClient :: Client MockTransport -> FilePath -> TraceGenerationConfig -> IO (MVar (Either Text ()))
-forkClient client specPath tc = do
+forkClient :: Client MockTransport -> ApalacheConfig -> TraceGenerationConfig -> IO (MVar (Either Text ()))
+forkClient client apCfg' tc' = do
   mv <- newEmptyMVar
-  _ <- forkIO $ runClient client specPath tc >>= putMVar mv
+  _ <- forkIO $ runClient client apCfg' tc' >>= putMVar mv
   pure mv
 
 x0 :: Map Text Value
@@ -51,13 +51,16 @@ x1 :: Map Text Value
 x1 = Map.singleton (T.pack "x") (VInt 1)
 
 config :: TraceGenerationConfig
-config = TraceGenerationConfig (T.pack "Inv") 10 1 Nothing Nothing T.empty
+config = TraceGenerationConfig 1 Nothing
+
+apCfg :: ApalacheConfig
+apCfg = ApalacheConfig "spec.tla" Nothing Nothing Nothing (T.pack "Inv") 10 T.empty
 
 testCorrectClientSucceeds :: TestTree
 testCorrectClientSucceeds = testCase "correct client succeeds" $ do
   (cEnd, mEnd) <- newMockTransport
   client <- cannedClient cEnd [x0, x1]
-  mv <- forkClient client "spec.tla" config
+  mv <- forkClient client apCfg config
   recvMsg mEnd >>= \case
     Right (Register _ _) -> pure ()
     other -> assertFailure $ "expected Register, got " ++ show other
@@ -80,7 +83,7 @@ testMismatchDetected :: TestTree
 testMismatchDetected = testCase "mismatch detected" $ do
   (cEnd, mEnd) <- newMockTransport
   let client = fixedClient cEnd (Map.singleton (T.pack "x") (VInt 999))
-  mv <- forkClient client "spec.tla" config
+  mv <- forkClient client apCfg config
   (_ :: Either String ClientMessage) <- recvMsg mEnd
   sendMsg mEnd (SpecValidated SpecValid)
   sendMsg mEnd (InitialState (T.pack "Init") Map.empty)
@@ -96,7 +99,7 @@ testCannedClient = testCase "cannedClient responses in order" $ do
   (cEnd, mEnd) <- newMockTransport
   let responses = [x0, x1, Map.singleton (T.pack "x") (VInt 2)]
   client <- cannedClient cEnd responses
-  mv <- forkClient client "spec.tla" config
+  mv <- forkClient client apCfg config
   (_ :: Either String ClientMessage) <- recvMsg mEnd
   sendMsg mEnd (SpecValidated SpecValid)
   sendMsg mEnd (InitialState (T.pack "Init") Map.empty)
@@ -123,7 +126,7 @@ testFixedClient = testCase "fixedClient always returns same state" $ do
   (cEnd, mEnd) <- newMockTransport
   let fixedState = Map.singleton (T.pack "y") (VInt 42)
       client = fixedClient cEnd fixedState
-  mv <- forkClient client "spec.tla" config
+  mv <- forkClient client apCfg config
   (_ :: Either String ClientMessage) <- recvMsg mEnd
   sendMsg mEnd (SpecValidated SpecValid)
   sendMsg mEnd (InitialState (T.pack "Init") Map.empty)
@@ -144,7 +147,7 @@ testSpecInvalid :: TestTree
 testSpecInvalid = testCase "SpecInvalid returned as error" $ do
   (cEnd, mEnd) <- newMockTransport
   let client = fixedClient cEnd Map.empty
-  mv <- forkClient client "spec.tla" config
+  mv <- forkClient client apCfg config
   (_ :: Either String ClientMessage) <- recvMsg mEnd
   sendMsg mEnd (SpecValidated (SpecInvalid (T.pack "typecheck failed")))
   result <- awaitResult mv
@@ -158,16 +161,15 @@ hcApalacheConfig = ApalacheConfig
   , initPredicate = Nothing
   , nextPredicate = Nothing
   , constInit     = Nothing
+  , invariant     = T.pack "TraceComplete"
+  , lengthBound   = 13
+  , paramVarNames = T.empty
   }
 
 hcTraceConfig :: TraceGenerationConfig
 hcTraceConfig = TraceGenerationConfig
-  { invariant      = T.pack "TraceComplete"
-  , lengthBound    = 13
-  , numTraces      = 1
-  , view           = Nothing
-  , cinit          = Nothing
-  , paramVarNames  = T.empty
+  { numTraces = 1
+  , view      = Nothing
   }
 
 testHourClock :: TestTree
@@ -183,7 +185,7 @@ testHourClock = testCase "hourClockClient passes verification" $ do
 
       (cEnd, mEnd) <- newMockTransport
       client <- hourClockClient cEnd
-      mv <- forkClient client "test/specs/HourClock.tla" hcTraceConfig
+      mv <- forkClient client hcApalacheConfig hcTraceConfig
 
       recvMsg mEnd >>= \case
         Right (Register _ _) -> pure ()

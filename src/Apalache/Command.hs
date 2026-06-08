@@ -62,7 +62,7 @@ generateTraces cfg tc = do
           pure $ Left $ ApalacheError (T.pack "Could not determine output directory from Apalache output")
         Just outDir -> do
           traces <- findTraces outDir
-          let pvs = filter (not . T.null) [paramVarNames tc]
+          let pvs = filter (not . T.null) [paramVarNames cfg]
           let traces' = map (applyParamVars pvs) traces
           case traces' of
             [] -> pure $ Left $ ApalacheError (T.pack "No ITF trace files found in output directory")
@@ -110,8 +110,8 @@ traceArgs :: ApalacheConfig -> TraceGenerationConfig -> [String]
 traceArgs cfg tc =
   concat
     [ ["check"]
-    , ["--inv=" ++ T.unpack (invariant tc)]
-    , ["--length=" ++ show (lengthBound tc)]
+    , ["--inv=" ++ T.unpack (invariant cfg)]
+    , ["--length=" ++ show (lengthBound cfg)]
     , ["--max-error=" ++ show (numTraces tc)]
     , ["--output-traces"]
     , optionalArg "--init=" (initPredicate cfg)
