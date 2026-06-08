@@ -79,7 +79,7 @@ testRunMirrorWithTracesDir = testCase "runMirrorWithTraces expands directory pat
 
       (clientEnd, mirrorEnd) <- newMockTransport
       done <- newEmptyMVar
-      _ <- forkIO $ runMirrorWithTraces mirrorEnd [tmpDir]
+      _ <- forkIO $ runMirrorWithTraces mirrorEnd hcApalacheCfg [tmpDir]
         >> putMVar done True
         `catch` (\(_ :: SomeException) -> putMVar done False)
 
@@ -149,7 +149,7 @@ testRunMirrorClientReport = testCase "ClientReport must send ReportState or time
   assertBool "at least one trace file" (not (null hcTracePaths))
 
   done <- newEmptyMVar
-  _ <- forkIO $ runMirrorWithTraces mirrorEnd hcTracePaths
+  _ <- forkIO $ runMirrorWithTraces mirrorEnd hcApalacheCfg hcTracePaths
         >> putMVar done True
         `catch` (\(_ :: SomeException) -> putMVar done False)
 
@@ -212,7 +212,7 @@ testRunMirrorGenThenReplay = testCase "runMirrorGenTraces then RegisterTraces re
 
       (clientEnd2, mirrorEnd2) <- newMockTransport
       done2 <- newEmptyMVar
-      _ <- forkIO $ runMirrorWithTraces mirrorEnd2 generatedPaths
+      _ <- forkIO $ runMirrorWithTraces mirrorEnd2 hcApalacheCfg generatedPaths
             >> putMVar done2 True
             `catch` (\(_ :: SomeException) -> putMVar done2 False)
 
@@ -378,7 +378,7 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
         Right stps -> Right stps
         Left (e :: SomeException) -> Left (show e)
 
-    driveSpecClient clientEnd hcTracePaths steps
+    driveSpecClient clientEnd hcApalacheCfg hcTracePaths steps
 
     mResult <- timeout 180_000_000 (readMVar mv)
     case mResult of
@@ -394,16 +394,16 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
               , "  raw:    " ++ show (map mirrorStepActionName implSteps)
               ]
 
-driveSpecClient :: MockTransport -> [FilePath] -> [TraceState] -> IO ()
-driveSpecClient clientEnd hcTracePaths = mapM_ drive
+driveSpecClient :: MockTransport -> ApalacheConfig -> [FilePath] -> [TraceState] -> IO ()
+driveSpecClient clientEnd apCfg hcTracePaths = mapM_ drive
   where
     drive s = case actionTake s of
        "ClientRegister" ->
-        sendMsg clientEnd (RegisterTraces hcTracePaths)
+        sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
        "ClientRegisterTraces" ->
-        sendMsg clientEnd (RegisterTraces hcTracePaths)
+        sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
        "ClientRegisterGenTraces" ->
-        sendMsg clientEnd (RegisterTraces hcTracePaths)
+        sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
        "ClientReport" ->
         sendMsg clientEnd (ReportState dummyState)
        "ClientRecvSpecValidated" -> recvAny clientEnd
@@ -478,7 +478,7 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
           sendMsg clientEnd (Register apCfg tc)
           pure (i, ("send Register", True, "ok"))
         "ClientRegisterTraces" -> do
-          sendMsg clientEnd (RegisterTraces tracePaths)
+          sendMsg clientEnd (RegisterTraces apCfg tracePaths)
           pure (i, ("send RegisterTraces", True, "ok"))
         "ClientRegisterGenTraces" -> do
           -- sendMsg clientEnd (RegisterGenTraces apCfg tc Nothing)

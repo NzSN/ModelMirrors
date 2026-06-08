@@ -19,6 +19,7 @@ import Apalache.Types
     , TraceGenerationResult (..)
     , ValidateResult (..)
     , Value
+    , applyParamVars
     )
 import Control.Monad (forM, forM_)
 import Data.Map.Strict (Map)
@@ -36,7 +37,7 @@ import System.FilePath (takeFileName, (</>))
 
 data MirrorStep
   = MirrorRecvRegister !ApalacheConfig !TraceGenerationConfig
-  | MirrorRecvRegisterTraces ![FilePath]
+  | MirrorRecvRegisterTraces !ApalacheConfig ![FilePath]
   | MirrorRecvRegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath)
   | MirrorRecvReportState !Int !Text
   | MirrorSendGenTracesDone ![FilePath]
@@ -86,9 +87,9 @@ run transport = do
     Right (Register apCfg tc) -> do
       steps <- runMirror transport apCfg tc
       pure (MirrorRecvRegister apCfg tc : steps)
-    Right (RegisterTraces traces) -> do
-      steps <- runMirrorWithTraces transport traces
-      pure (MirrorRecvRegisterTraces traces : steps)
+    Right (RegisterTraces apCfg traces) -> do
+      steps <- runMirrorWithTraces transport apCfg traces
+      pure (MirrorRecvRegisterTraces apCfg traces : steps)
     Right (RegisterGenTraces apCfg tc destPath) -> do
       steps <- runMirrorGenTraces transport apCfg tc destPath
       pure (MirrorRecvRegisterGenTraces apCfg tc destPath : steps)
@@ -116,8 +117,8 @@ runMirror transport cfg tc = do
       sendMsg transport (ProtocolError e)
       pure [MirrorSendProtocolError e]
 
-runMirrorWithTraces :: Transport t => t -> [FilePath] -> IO [MirrorStep]
-runMirrorWithTraces transport tracePaths = do
+runMirrorWithTraces :: Transport t => t -> ApalacheConfig -> [FilePath] -> IO [MirrorStep]
+runMirrorWithTraces transport cfg tracePaths = do
   expanded <- concat <$> mapM expandPath tracePaths
   traces <- mapM readTrace expanded
   case sequence traces of
@@ -125,9 +126,11 @@ runMirrorWithTraces transport tracePaths = do
       sendMsg transport (RegisterError (T.pack err))
       pure [MirrorSendRegisterError (T.pack err)]
     Right parsed -> do
+      let pvs = filter (not . T.null) [paramVarNames cfg]
+          traces' = map (applyParamVars pvs) parsed
       sendMsg transport (SpecValidated SpecValid)
       let driver = makeTransportDriver transport
-      stepResults <- concat <$> forM parsed (replaySteps transport driver)
+      stepResults <- concat <$> forM traces' (replaySteps transport driver)
       sendMsg transport AllStepsDone
       pure (MirrorSendSpecValidatedValid : stepResults ++ [MirrorSendAllStepsDone])
   where

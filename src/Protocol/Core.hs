@@ -10,7 +10,7 @@ import Data.Text (Text)
 
 data ClientMessage
   = Register !ApalacheConfig !TraceGenerationConfig
-  | RegisterTraces ![FilePath]
+  | RegisterTraces !ApalacheConfig ![FilePath]
   | RegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath)
   | ReportState !(Map Text Value)
   deriving (Show, Eq)

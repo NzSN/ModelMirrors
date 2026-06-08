@@ -34,9 +34,9 @@ runClient client apCfg tc = do
     Right (ProtocolError e)               -> pure (Left e)
     Right _                                -> pure (Left (T.pack "Unexpected message: expected SpecValidated"))
 
-runClientWithTraces :: Transport t => Client t -> [FilePath] -> IO (Either Text ())
-runClientWithTraces client traces = do
-  sendMsg (clientTransport client) (RegisterTraces traces)
+runClientWithTraces :: Transport t => Client t -> ApalacheConfig -> [FilePath] -> IO (Either Text ())
+runClientWithTraces client apCfg traces = do
+  sendMsg (clientTransport client) (RegisterTraces apCfg traces)
   recvMsg (clientTransport client) >>= \case
     Left err                               -> pure (Left (T.pack err))
     Right (SpecValidated SpecValid)       -> stepLoop client

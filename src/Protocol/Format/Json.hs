@@ -16,8 +16,9 @@ instance ToJSON ClientMessage where
     , fromString "apalacheConfig" .= apCfg
     , fromString "traceConfig" .= tc
     ]
-  toJSON (RegisterTraces traces) = object
+  toJSON (RegisterTraces apCfg traces) = object
     [ fromString "proto_step" .= T.pack "register_traces"
+    , fromString "apalacheConfig" .= apCfg
     , fromString "itfTracePaths" .= traces
     ]
   toJSON (RegisterGenTraces apCfg tc dest) = object
@@ -38,7 +39,7 @@ instance FromJSON ClientMessage where
       t | t == T.pack "register" ->
           Register <$> o .: fromString "apalacheConfig" <*> o .: fromString "traceConfig"
       t | t == T.pack "register_traces" ->
-          RegisterTraces <$> o .: fromString "itfTracePaths"
+          RegisterTraces <$> o .: fromString "apalacheConfig" <*> o .: fromString "itfTracePaths"
       t | t == T.pack "register_trace_gen" ->
           RegisterGenTraces <$> o .: fromString "apalacheConfig"
                             <*> o .: fromString "traceConfig"

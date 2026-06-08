@@ -49,7 +49,7 @@ testEndToEnd = testCase "DeterministicCounter end-to-end" $ do
         input = B8.pack $ unlines $ registerLine : stateLines
 
         registerLine =
-          "{\"proto_step\":\"register\",\"apalacheConfig\":{\"specPath\":\"test/specs/DeterministicCounter.tla\",\"initPredicate\":null,\"nextPredicate\":null,\"constInit\":null,\"invariant\":\"TraceComplete\",\"lengthBound\":5,\"paramVarNames\":\"\"},\"traceConfig\":{\"numTraces\":1,\"view\":null}}"
+          "{\"proto_step\":\"register\",\"apalacheConfig\":{\"specPath\":\"test/specs/DeterministicCounter.tla\",\"initPredicate\":null,\"nextPredicate\":null,\"constInit\":null,\"invariant\":\"TraceComplete\",\"lengthBound\":5,\"paramVars\":\"\"},\"traceConfig\":{\"numTraces\":1,\"view\":null}}"
 
         stateLines = concat $ replicate 2
           [ mkReport 0 "init" 0
@@ -120,7 +120,7 @@ testCounterEndToEnd = testCase "Counter end-to-end" $ do
     Just bin -> do
       let
         registerLine =
-          "{\"proto_step\":\"register\",\"apalacheConfig\":{\"specPath\":\"test/specs/Counter.tla\",\"initPredicate\":null,\"nextPredicate\":null,\"constInit\":\"CInit\",\"invariant\":\"TraceComplete\",\"lengthBound\":5,\"paramVarNames\":\"parameters\"},\"traceConfig\":{\"numTraces\":1,\"view\":null}}"
+          "{\"proto_step\":\"register\",\"apalacheConfig\":{\"specPath\":\"test/specs/Counter.tla\",\"initPredicate\":null,\"nextPredicate\":null,\"constInit\":\"CInit\",\"invariant\":\"TraceComplete\",\"lengthBound\":5,\"paramVars\":\"parameters\"},\"traceConfig\":{\"numTraces\":1,\"view\":null}}"
 
         mkReport c a s = concat
           [ "{\"proto_step\":\"report_state\",\"state\":{"

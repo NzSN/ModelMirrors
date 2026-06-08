@@ -42,7 +42,7 @@ instance ToJSON ApalacheConfig where
     , fromString "constInit" .= constInit c
     , fromString "invariant" .= invariant c
     , fromString "lengthBound" .= lengthBound c
-    , fromString "paramVarNames" .= paramVarNames c
+    , fromString "paramVars" .= paramVarNames c
     ]
 
 instance FromJSON ApalacheConfig where
@@ -54,7 +54,7 @@ instance FromJSON ApalacheConfig where
       <*> o .:? fromString "constInit" .!= Nothing
       <*> o .:? fromString "invariant" .!= T.empty
       <*> o .:? fromString "lengthBound" .!= 10
-      <*> o .:? fromString "paramVarNames" .!= T.empty
+      <*> o .:? fromString "paramVars" .!= T.empty
 
 data TraceGenerationConfig = TraceGenerationConfig
   { numTraces   :: !Int
