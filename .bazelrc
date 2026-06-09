@@ -1,3 +1,5 @@
 # Test output
 test --test_output=errors
 common --noincompatible_disallow_ctx_resolve_tools
+# Mount apalache into sandbox so tests can find apalache-mc and its jar
+test --sandbox_add_mount_pair=/home/nzsn/.local/bin/apalache

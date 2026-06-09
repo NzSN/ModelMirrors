@@ -8,10 +8,13 @@ haskell_library(
     deps = [
         "@stackage//:aeson",
         "//:base",
+        "@stackage//:base64-bytestring",
         "@stackage//:bytestring",
         "@stackage//:containers",
         "@stackage//:directory",
         "@stackage//:filepath",
+        "@stackage//:http-client",
+        "@stackage//:http-types",
         "@stackage//:process",
         "@stackage//:text",
     ],

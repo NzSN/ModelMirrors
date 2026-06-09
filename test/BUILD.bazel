@@ -7,7 +7,10 @@ haskell_test(
         exclude = ["specs/**"],
     ),
     ghcopts = ["-Wall", "-XGHC2024"],
-    data = glob(["specs/*.tla"]) + ["//:specs/MirrorProtocol.tla"],
+    data = glob(["specs/*.tla"]) + [
+        "//:specs/MirrorProtocol.tla",
+        "//app:ModelMirrors",
+    ],
     deps = [
         "//src:ModelMirrors",
         "//:base",
@@ -16,6 +19,7 @@ haskell_test(
         "@stackage//:bytestring",
         "@stackage//:containers",
         "@stackage//:directory",
+        "@stackage//:filepath",
         "@stackage//:process",
         "@stackage//:tasty",
         "@stackage//:tasty-hunit",

@@ -4,8 +4,8 @@ _APALACHE_SHA256 = "d73ad6945ca924155dc9b85c4770bb4e5d5ff6c19366966795e734cbfed5
 
 def _apalache_mc_repo_impl(repository_ctx):
     downloaded = False
-    apalache = repository_ctx.which("apalache-mc")
-    if apalache == None:
+    apalache_path = repository_ctx.which("apalache-mc")
+    if apalache_path == None:
         repository_ctx.download_and_extract(
             url = _APALACHE_URL,
             sha256 = _APALACHE_SHA256,
@@ -13,6 +13,8 @@ def _apalache_mc_repo_impl(repository_ctx):
         )
         apalache = "bin/apalache-mc"
         downloaded = True
+    else:
+        apalache = str(apalache_path)
 
     if downloaded:
         repository_ctx.file("BUILD.bazel", """load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
@@ -32,11 +34,16 @@ sh_binary(
 )
 """)
 
-    repository_ctx.file("apalache-mc.sh", """#!/bin/bash
+    if apalache.startswith("/"):
+        exec_line = 'exec "' + apalache + '" "$@"'
+    else:
+        exec_line = 'exec "$DIR/' + apalache + '" "$@"'
+
+    script = """#!/bin/bash
 set -euo pipefail
 DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
-exec "$DIR/{apalache}" "$@"
-""".format(apalache = apalache), executable = True)
+""" + exec_line
+    repository_ctx.file("apalache-mc.sh", script.format(), executable = True)
 
 apalache_mc_repository = repository_rule(
     implementation = _apalache_mc_repo_impl,

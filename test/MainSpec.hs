@@ -3,8 +3,10 @@ module MainSpec (spec) where
 import Control.Exception (SomeException, try, displayException)
 import Data.ByteString.Char8 qualified as B8
 import Data.List (isInfixOf, isSuffixOf)
-import System.Directory (doesFileExist)
+import System.Directory (doesFileExist, doesDirectoryExist)
+import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
+import System.FilePath ((</>))
 import System.Process (readProcess, readProcessWithExitCode)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, assertBool, assertFailure)
@@ -14,21 +16,36 @@ spec = testGroup "MainSpec" [testEndToEnd, testCounterEndToEnd]
 
 findMirrorBinary :: IO FilePath
 findMirrorBinary = do
-  raw <- lines <$> readProcess "find"
-    [ "dist-newstyle/build"
-    , "-name", "ModelMirrors"
-    , "-type", "f"
-    , "-executable"
-    ] ""
-  let candidates = filter
-        (\p -> "/x/ModelMirrors/build/ModelMirrors/ModelMirrors" `isSuffixOf` p)
-        raw
-  case candidates of
-    (p : _) -> do
-      exists <- doesFileExist p
-      if exists then pure p
-      else error $ "binary listed by find but not accessible: " ++ p
-    _ -> error $ "ModelMirrors binary not found. Found: " ++ show raw
+  mRunfiles <- lookupEnv "RUNFILES_DIR"
+  case mRunfiles of
+    Just rf -> do
+      let bazelPath = rf </> "_main" </> "app" </> "ModelMirrors"
+      exists <- doesFileExist bazelPath
+      if exists then pure bazelPath
+      else findCabalBinary
+    Nothing -> findCabalBinary
+
+findCabalBinary :: IO FilePath
+findCabalBinary = do
+  exists <- doesDirectoryExist "dist-newstyle/build"
+  if not exists
+    then error "dist-newstyle/build not found and RUNFILES_DIR not set"
+    else do
+      raw <- lines <$> readProcess "find"
+        [ "dist-newstyle/build"
+        , "-name", "ModelMirrors"
+        , "-type", "f"
+        , "-executable"
+        ] ""
+      let candidates = filter
+            (\p -> "/x/ModelMirrors/build/ModelMirrors/ModelMirrors" `isSuffixOf` p)
+            raw
+      case candidates of
+        (p : _) -> do
+          exists' <- doesFileExist p
+          if exists' then pure p
+          else error $ "binary listed by find but not accessible: " ++ p
+        _ -> error $ "ModelMirrors binary not found. Found: " ++ show raw
 
 findMirrorBinaryOrSkip :: IO (Maybe FilePath)
 findMirrorBinaryOrSkip = do

@@ -66,10 +66,13 @@ stack_snapshot = use_extension(
 )
 
 stack_snapshot.package(name = "aeson")
+stack_snapshot.package(name = "base64-bytestring")
 stack_snapshot.package(name = "bytestring")
 stack_snapshot.package(name = "containers")
 stack_snapshot.package(name = "directory")
 stack_snapshot.package(name = "filepath")
+stack_snapshot.package(name = "http-client")
+stack_snapshot.package(name = "http-types")
 stack_snapshot.package(name = "process")
 stack_snapshot.package(name = "text")
 
