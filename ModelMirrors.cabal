@@ -151,6 +151,7 @@ test-suite ModelMirrors-test
         ClientSpec,
         EngineSpec,
         MainSpec,
+        MinimalTraceCheckSpec,
         MirrorProtocolSpec,
         MirrorStepSpec
 
