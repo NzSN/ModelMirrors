@@ -150,7 +150,7 @@ instance Transport t => Step (MkRunMirrorWithTraces t) where
         let driver = makeTransportDriver transport
         stepResults <- exec (MkReplayAll transport driver traces')
         sendMsg transport AllStepsDone
-        pure (MirrorSendSpecValidatedValid : stepResults ++ [MirrorSendAllStepsDone])
+        pure (stepResults ++ [MirrorSendAllStepsDone])
     where
       expandPath p = do
         isDir <- doesDirectoryExist p

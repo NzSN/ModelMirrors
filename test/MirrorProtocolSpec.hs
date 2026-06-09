@@ -26,7 +26,8 @@ import Engine.Core (traceSteps)
 import Engine.Types (Step (..))
 import Protocol.Core (ClientMessage (..), MirrorMessage (..))
 import Protocol.Format.Json ()
-import Protocol.Mirror (mirrorStepActionName, normalizeMirrorSteps, run, runMirrorWithTraces, runMirrorGenTraces)
+import MinimalTraceCheck (normalize)
+import Protocol.Mirror (mirrorStepActionName, run, runMirrorWithTraces, runMirrorGenTraces)
 import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
 import Protocol.Transport.Mock (MockTransport, newMockTransport)
 import System.Directory (createDirectory, getTemporaryDirectory, removeDirectoryRecursive)
@@ -340,35 +341,14 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
           (pre, t : _) -> pre ++ [t]
           (pre, [])   -> pre
 
-        expandSpec a
-          | a == T.pack "MirrorRecvRegisterTraces" =
-              [T.pack "MirrorRecvRegister", T.pack "MirrorSendSpecValidated"]
-          | a == T.pack "MirrorRecvRegister" = [T.pack "MirrorRecvRegister"]
-          | a == T.pack "MirrorRecvRegisterGenTraces" = [T.pack "MirrorRecvRegister"]
-          | "MirrorSendSpecValidated" `T.isPrefixOf` a = [T.pack "MirrorSendSpecValidated"]
-          | "MirrorSendStep" `T.isPrefixOf` a = [T.pack "MirrorRecvReportState"]
-          | a == T.pack "MirrorSendGenTracesDone" = []
-          | otherwise = [a]
-
-        specActions = concat [ expandSpec (actionTake s)
-                             | s <- cycleSteps
-                             , "Mirror" `T.isPrefixOf` actionTake s
-                             ]
-
-        implNormalize a
-          | a == T.pack "MirrorRecvRegisterTraces" = T.pack "MirrorRecvRegister"
-          | a == T.pack "MirrorRecvRegisterGenTraces" = T.pack "MirrorRecvRegister"
-          | a == T.pack "MirrorSendSpecValidatedValid" = T.pack "MirrorSendSpecValidated"
-          | a == T.pack "MirrorSendSpecValidatedInvalid" = T.pack "MirrorSendSpecValidated"
+        specCanon a
+          | a == T.pack "MirrorRecvRegister" = T.pack "MirrorRecvRegisterTraces"
+          | a == T.pack "MirrorSendSpecValidatedValid" = T.pack ""
           | otherwise = a
-
-        normRepeatInit [] = []
-        normRepeatInit (x:xs)
-          | x == T.pack "MirrorSendInitialState" = x : map rep xs
-          | otherwise = x : normRepeatInit xs
-          where
-            rep a | a == T.pack "MirrorSendInitialState" = T.pack "MirrorSendNextStep"
-                  | otherwise = a
+        specActions = filter (not . T.null) [ specCanon (actionTake s)
+                                            | s <- cycleSteps
+                                            , "Mirror" `T.isPrefixOf` actionTake s
+                                            ]
 
     (clientEnd, mirrorEnd) <- newMockTransport
     mv <- newEmptyMVar
@@ -385,8 +365,12 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
       Nothing -> assertFailure "mirror did not complete within timeout"
       Just (Left e) -> assertFailure $ "mirror threw exception: " ++ e
       Just (Right implSteps) -> do
-        let implActions = normRepeatInit (map implNormalize (normalizeMirrorSteps implSteps))
-        unless (specActions `isPrefixOf` implActions) $
+        let stepCanon a
+              | a == T.pack "MirrorSendStepOk" = T.pack "MirrorRecvReportState"
+              | a == T.pack "MirrorSendStepMismatch" = T.pack "MirrorRecvReportState"
+              | otherwise = a
+            implActions = map (stepCanon . mirrorStepActionName) (normalize implSteps)
+        unless (specActions == implActions) $
           assertFailure $ unlines $
             ("protocol trace mismatch:")
             : [ "  spec:   " ++ show specActions
@@ -399,13 +383,13 @@ driveSpecClient clientEnd apCfg hcTracePaths = mapM_ drive
   where
     drive s = case actionTake s of
        "ClientRegister" ->
-        sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
+         sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
        "ClientRegisterTraces" ->
-        sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
+         sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
        "ClientRegisterGenTraces" ->
-        sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
+         sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
        "ClientReport" ->
-        sendMsg clientEnd (ReportState dummyState)
+         sendMsg clientEnd (ReportState dummyState)
        "ClientRecvSpecValidated" -> recvAny clientEnd
        "ClientRecvGenTracesDone" -> recvAny clientEnd
        "ClientRecvInitialState" -> recvAny clientEnd
@@ -481,7 +465,7 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
           sendMsg clientEnd (RegisterTraces apCfg tracePaths)
           pure (i, ("send RegisterTraces", True, "ok"))
         "ClientRegisterGenTraces" -> do
-          -- sendMsg clientEnd (RegisterGenTraces apCfg tc Nothing)
+          sendMsg clientEnd (RegisterGenTraces apCfg tc Nothing)
           pure (i, ("send RegisterGenTraces", True, "ok"))
         "ClientRecvSpecValidated" ->
           pure (i, ("skip ClientRecvSpecValidated", True, "ok"))
