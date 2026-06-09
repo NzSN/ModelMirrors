@@ -237,6 +237,52 @@ See `src/Protocol/Client.hs` for a reference Haskell client implementation,
 including `cannedClient` (pre-canned responses), `fixedClient` (static state),
 and `hourClockClient` (real logic for the HourClock spec).
 
+## Self-Verification
+
+ModelMirrors verifies its own mirror implementation using **model-based
+testing (MBT)**. A TLA+ protocol model generates expected action sequences;
+the real mirror is driven through the same flows and its output is compared.
+
+### How it works
+
+**1. Model the protocol** — `specs/MirrorProtocol.tla` is a state machine with
+two parties (mirror and client), message channels, and actions like
+`MirrorRecvRegister`, `MirrorSendInitialState`, `MirrorRecvReportState`.
+Invariants act as stop conditions — violating them produces counterexample
+traces.
+
+**2. Generate traces** — Apalache model-checks the spec. When an invariant is
+violated, it produces ITF traces — sequences of states showing every action
+taken. With `numTraces = 100`, we get distinct protocol flows covering
+different registration paths, step counts, and Ok/Mismatch branches.
+
+**3. Drive the mirror** — For each trace, the test forks the real mirror
+and a real HourClock client (`hourClockClient` + `runClientWithTraces`).
+The client sends a `RegisterTraces` message with a pre-generated HourClock
+trace; the mirror replays step-by-step; the client responds with correct
+state computed via `hcTick`. The mirror returns a `[MirrorStep]` — a
+structured trace of every protocol event it performed.
+
+**4. Normalize** — `MinimalTraceCheck.normalize` collapses timing-dependent
+pairs (`RecvReport+StepOk` → `StepOk`, `RecvReport+StepMismatch` →
+`StepMismatch`) and strips terminal `AllStepsDone`.
+
+**5. Build the expected sequence** — The TLA+ trace's mirror actions are
+extracted and normalized to canonical names (e.g. `RecvRegister` →
+`RecvRegisterTraces` since the test always uses that path).
+
+**6. Compare** — Both sequences are trimmed to the spec's step count and
+compared with `==`. The key insight: step results (`StepOk` vs `StepMismatch`)
+map to the same canonical name — the MBT test verifies protocol message
+*sequence*, not state correctness.
+
+### Verified models
+
+| Spec | Checked with | Properties |
+|---|---|---|
+| `specs/MirrorProtocol.tla` | TLC | `PhaseOk`, `NoProtocolError` |
+| `specs/MinimalTraceCheck.tla` | TLC, Apalache | `SelfCheck`, `NormalizeIdempotent` |
+
 ## Project Structure
 
 ```
@@ -245,7 +291,8 @@ ModelMirrors/
 ├── src/
 │   ├── Apalache/     Apalache types, command runner, trace parsing
 │   ├── Engine/       Trace replay engine and step diffing
-│   └── Protocol/     IPC protocol (core types, JSON format, transport)
+│   ├── Protocol/     IPC protocol (core types, JSON format, transport)
+│   └── MinimalTraceCheck.hs   Trace normalization and comparison
 ├── test/
 │   ├── Main.hs       Test runner
 │   └── specs/        TLA+ specs used by integration tests
@@ -270,6 +317,7 @@ ModelMirrors/
 | `Protocol.Transport.Stdio`      | Stdio implementation of `Transport`               |
 | `Protocol.Client`               | Reference client with canned/fixed/hourClock impl |
 | `Protocol.Mirror`               | `runMirror`, `runMirrorWithTraces`                |
+| `MinimalTraceCheck`             | Normalize and compare MirrorStep sequences        |
 
 ## License
 
