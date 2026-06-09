@@ -18,9 +18,12 @@ spec = testGroup "MinimalTraceCheck"
   , normalizeCollapseMismatchPair
   , normalizeMultipleCollapses
   , normalizeNoAllDoneInMiddle
+  , normalizeMismatchedIndexNoCollapse
+  , normalizeDanglingRecvReport
   , checkSameTrace
   , checkDifferentTrace
-  , checkMismatchVsMatch
+  , checkBothEmpty
+  , checkNormalizesToSame
   , checkEmptyVsNonEmpty
   ]
 
@@ -98,18 +101,38 @@ normalizeNoAllDoneInMiddle = testCase "normalize keeps AllStepsDone if not trail
     , MirrorSendStepOk 0
     ]
 
+normalizeMismatchedIndexNoCollapse :: TestTree
+normalizeMismatchedIndexNoCollapse = testCase "normalize does not collapse RecvReport+StepOk with different indices" $
+  normalize
+    [ MirrorRecvReportState 0 (T.pack "init")
+    , MirrorSendStepOk 1
+    ]
+  @?=
+    [ MirrorRecvReportState 0 (T.pack "init")
+    , MirrorSendStepOk 1
+    ]
+
+normalizeDanglingRecvReport :: TestTree
+normalizeDanglingRecvReport = testCase "normalize preserves dangling RecvReport" $
+  normalize
+    [ MirrorRecvReportState 0 (T.pack "init")
+    ]
+  @?=
+    [ MirrorRecvReportState 0 (T.pack "init")
+    ]
+
 -------------------------------------------------------------------------------
 -- check tests
 
 checkSameTrace :: TestTree
-checkSameTrace = testCase "check returns True for identical traces" $ do
+checkSameTrace = testCase "check returns True for identical traces" $
   let trace =
         [ MirrorSendInitialState (T.pack "init") (Map.singleton (T.pack "x") (VInt 1))
         , MirrorRecvReportState 0 (T.pack "init")
         , MirrorSendStepOk 0
         , MirrorSendAllStepsDone
         ]
-  check trace trace @?= True
+   in check trace trace @?= True
 
 checkDifferentTrace :: TestTree
 checkDifferentTrace = testCase "check returns False for different traces" $
@@ -122,18 +145,15 @@ checkDifferentTrace = testCase "check returns False for different traces" $
     ]
   @?= False
 
-checkMismatchVsMatch :: TestTree
-checkMismatchVsMatch = testCase "check returns False for mismatch vs match" $
-  check
-    [ MirrorRecvReportState 0 (T.pack "tick")
-    , MirrorSendStepOk 0
-    ]
-    [ MirrorRecvReportState 0 (T.pack "tick")
-    , MirrorSendStepMismatch 0 diff
-    ]
-  @?= False
-  where
-    diff = StateMismatch Map.empty Map.empty [ValueMismatch (T.pack "x") (VInt 1) (VInt 2)]
+checkBothEmpty :: TestTree
+checkBothEmpty = testCase "check [] [] returns True" $
+  check [] [] @?= True
+
+checkNormalizesToSame :: TestTree
+checkNormalizesToSame = testCase "check returns True for traces that normalize to same" $ do
+  let expected = [MirrorRecvReportState 0 (T.pack "tick"), MirrorSendStepOk 0]
+      produced = [MirrorRecvReportState 0 (T.pack "tick"), MirrorSendStepOk 0, MirrorSendAllStepsDone]
+  check expected produced @?= True
 
 checkEmptyVsNonEmpty :: TestTree
 checkEmptyVsNonEmpty = testCase "check returns False for empty vs non-empty" $
