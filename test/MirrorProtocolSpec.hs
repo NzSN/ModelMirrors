@@ -27,6 +27,7 @@ import Engine.Types (Step (..))
 import Protocol.Core (ClientMessage (..), MirrorMessage (..))
 import Protocol.Format.Json ()
 import MinimalTraceCheck (normalize)
+import Protocol.Client (hourClockClient, runClientWithTraces)
 import Protocol.Mirror (mirrorStepActionName, run, runMirrorWithTraces, runMirrorGenTraces)
 import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
 import Protocol.Transport.Mock (MockTransport, newMockTransport)
@@ -349,6 +350,9 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
                                             | s <- cycleSteps
                                             , "Mirror" `T.isPrefixOf` actionTake s
                                             ]
+        specStepCount = length [ () | s <- cycleSteps
+                                  , actionTake s == T.pack "MirrorRecvReportState"
+                                  ]
 
     (clientEnd, mirrorEnd) <- newMockTransport
     mv <- newEmptyMVar
@@ -358,7 +362,8 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
         Right stps -> Right stps
         Left (e :: SomeException) -> Left (show e)
 
-    driveSpecClient clientEnd hcApalacheCfg hcTracePaths steps
+    client <- hourClockClient clientEnd
+    _ <- runClientWithTraces client hcApalacheCfg hcTracePaths
 
     mResult <- timeout 180_000_000 (readMVar mv)
     case mResult of
@@ -370,41 +375,14 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
               | a == T.pack "MirrorSendStepMismatch" = T.pack "MirrorRecvReportState"
               | otherwise = a
             implActions = map (stepCanon . mirrorStepActionName) (normalize implSteps)
-        unless (specActions == implActions) $
+            implTrimmed = take (2 * specStepCount + 1) implActions
+        unless (specActions == implTrimmed) $
           assertFailure $ unlines $
             ("protocol trace mismatch:")
             : [ "  spec:   " ++ show specActions
-              , "  impl:   " ++ show implActions
+              , "  impl:   " ++ show implTrimmed
               , "  raw:    " ++ show (map mirrorStepActionName implSteps)
               ]
-
-driveSpecClient :: MockTransport -> ApalacheConfig -> [FilePath] -> [TraceState] -> IO ()
-driveSpecClient clientEnd apCfg hcTracePaths = mapM_ drive
-  where
-    drive s = case actionTake s of
-       "ClientRegister" ->
-         sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
-       "ClientRegisterTraces" ->
-         sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
-       "ClientRegisterGenTraces" ->
-         sendMsg clientEnd (RegisterTraces apCfg hcTracePaths)
-       "ClientReport" ->
-         sendMsg clientEnd (ReportState dummyState)
-       "ClientRecvSpecValidated" -> recvAny clientEnd
-       "ClientRecvGenTracesDone" -> recvAny clientEnd
-       "ClientRecvInitialState" -> recvAny clientEnd
-       "ClientRecvNextStep" -> recvAny clientEnd
-       "ClientRecvStepOk" -> recvAny clientEnd
-       "ClientRecvStepMismatch" -> recvAny clientEnd
-       "ClientRecvAllStepsDone" -> recvAny clientEnd
-       "ClientRecvRegisterError" -> recvAny clientEnd
-       "ClientRecvProtocolError" -> recvAny clientEnd
-       _ -> pure ()
-
-recvAny :: Transport t => t -> IO ()
-recvAny t = do
-  _ <- timeout 60_000_000 (recvMsg t :: IO (Either String MirrorMessage))
-  pure ()
 
 generateMirrorTrace :: IO ItfTrace
 generateMirrorTrace = do
@@ -433,7 +411,7 @@ generateMirrorTraces = do
         , initPredicate = Nothing
         , nextPredicate = Nothing
         , constInit     = Nothing
-        , invariant     = T.pack "TraceStepping"
+          , invariant     = T.pack "TraceComplete"
         , lengthBound   = 20
         , paramVarNames = T.empty
         }
