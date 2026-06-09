@@ -2,6 +2,7 @@ module Apalache.Command
   ( validateSpec
   , generateTraces
   , generateTraceFiles
+  , apalacheBin
   ) where
 
 import Apalache.Types
