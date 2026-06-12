@@ -116,7 +116,17 @@ data Value
   | VTuple  ![Value]
   | VRecord !(Map Text Value)
   | VNull
-  deriving (Show, Eq)
+  deriving (Show)
+
+instance Eq Value where
+  VInt a    == VInt b    = a == b
+  VBool a   == VBool b   = a == b
+  VStr a    == VStr b    = a == b
+  VSet xs   == VSet ys   = length xs == length ys && all (\x -> any (x ==) ys) xs
+  VTuple a  == VTuple b  = a == b
+  VRecord a == VRecord b = a == b
+  VNull     == VNull     = True
+  _         == _         = False
 
 instance ToJSON TraceState where
   toJSON ts = A.toJSON
@@ -161,6 +171,9 @@ instance FromJSON Value where
     | Just (A.Array arr) <- KM.lookup (fromString "#tup") o
     = VTuple <$> mapM A.parseJSON (F.toList arr)
 
+    | Just (A.Array arr) <- KM.lookup (fromString "#set") o
+    = VSet <$> mapM A.parseJSON (F.toList arr)
+
     | Just (A.Array arr) <- KM.lookup (fromString "#map") o
     = let parseEntry v = case v of
             A.Array pairArr -> case F.toList pairArr of
@@ -199,7 +212,7 @@ instance ToJSON Value where
     object [fromString "#bigint" .= T.pack (show i)]
   toJSON (VBool b)   = A.Bool b
   toJSON (VStr s)    = A.String s
-  toJSON (VSet vs)   = A.toJSON (map A.toJSON vs)
+  toJSON (VSet vs)   = object [fromString "#set" .= map A.toJSON vs]
   toJSON (VTuple vs) = object [fromString "#tup" .= A.toJSON (map A.toJSON vs)]
   toJSON (VRecord m) = object [(fromText k, A.toJSON v) | (k, v) <- Map.toList m]
   toJSON VNull       = A.Null
