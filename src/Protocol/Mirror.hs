@@ -177,8 +177,14 @@ instance Transport t => Step (MkReplayAll t) where
   exec (MkReplayAll _ _ []) = pure []
   exec (MkReplayAll transport driver (t : ts)) = do
     steps <- exec (MkReplayOne transport driver t)
-    rest <- exec (MkReplayAll transport driver ts)
-    pure (steps ++ rest)
+    if hasMismatch steps
+      then pure steps
+      else do
+        rest <- exec (MkReplayAll transport driver ts)
+        pure (steps ++ rest)
+
+hasMismatch :: [MirrorStep] -> Bool
+hasMismatch = any (\case MirrorSendStepMismatch{} -> True; _ -> False)
 
 instance Transport t => Step (MkReplayOne t) where
   exec (MkReplayOne transport driver trace) = go driver (traceSteps trace)
