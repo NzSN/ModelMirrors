@@ -150,9 +150,9 @@ testReplaySecondMismatch = testCase "replayTrace second mismatch" $ do
     other -> assertFailure $ "expected [StatesMatch, StateMismatch], got " ++ show other
 
 testDecodeMap :: TestTree
-testDecodeMap = testCase "decode #map to VRecord" $ do
+testDecodeMap = testCase "decode #map to VMap" $ do
   let json = LBS8.pack "{\"#map\": [[0, {\"bh\": 0}], [1, {\"bh\": 0}]]}"
-      expected = VRecord $ Map.fromList
+      expected = VMap $ Map.fromList
         [ (T.pack "0", VRecord (Map.singleton (T.pack "bh") (VInt 0)))
         , (T.pack "1", VRecord (Map.singleton (T.pack "bh") (VInt 0)))
         ]

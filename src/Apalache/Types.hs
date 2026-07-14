@@ -109,12 +109,16 @@ applyParamVars pvs t = t
       }
 
 data Value
-  = VInt    !Integer
-  | VBool   !Bool
-  | VStr    !Text
-  | VSet    ![Value]
-  | VTuple  ![Value]
-  | VRecord !(Map Text Value)
+  = VInt            !Integer
+  | VBool           !Bool
+  | VStr            !Text
+  | VSet            ![Value]
+  | VSeq            ![Value]
+  | VTuple          ![Value]
+  | VRecord         !(Map Text Value)
+  | VMap            !(Map Text Value)
+  | VVariant        !Text !Value
+  | VUnserializable !Text
   | VNull
   deriving (Show)
 
@@ -123,10 +127,14 @@ instance Eq Value where
   VBool a   == VBool b   = a == b
   VStr a    == VStr b    = a == b
   VSet xs   == VSet ys   = length xs == length ys && all (\x -> any (x ==) ys) xs
+  VSeq a    == VSeq b    = a == b
   VTuple a  == VTuple b  = a == b
-  VRecord a == VRecord b = a == b
-  VNull     == VNull     = True
-  _         == _         = False
+  VRecord a         == VRecord b         = a == b
+  VMap a            == VMap b            = a == b
+  VVariant t1 v1     == VVariant t2 v2     = t1 == t2 && v1 == v2
+  VUnserializable s1 == VUnserializable s2 = s1 == s2
+  VNull              == VNull              = True
+  _                  == _                  = False
 
 instance ToJSON TraceState where
   toJSON ts = A.toJSON
@@ -186,14 +194,22 @@ instance FromJSON Value where
           valueToText (VInt i) = T.pack (show i)
           valueToText (VStr s) = s
           valueToText v        = T.pack (show v)
-      in VRecord . Map.fromList <$> mapM parseEntry (F.toList arr)
+      in VMap . Map.fromList <$> mapM parseEntry (F.toList arr)
+
+    | Just (A.String u) <- KM.lookup (fromString "#unserializable") o
+    = pure $ VUnserializable u
+
+    | KM.size o == 2
+    , Just (A.String t) <- KM.lookup (fromString "tag") o
+    , Just val <- KM.lookup (fromString "value") o
+    = VVariant t <$> A.parseJSON val
 
     | otherwise = do
         pairs <- mapM (\(k, v) -> (toText k,) <$> A.parseJSON v) (KM.toList o)
         pure $ VRecord (Map.fromList pairs)
 
   parseJSON (A.Array arr) =
-    VSet <$> mapM A.parseJSON (F.toList arr)
+    VSeq <$> mapM A.parseJSON (F.toList arr)
 
   parseJSON (A.Bool b) =
     pure $ VBool b
@@ -213,6 +229,13 @@ instance ToJSON Value where
   toJSON (VBool b)   = A.Bool b
   toJSON (VStr s)    = A.String s
   toJSON (VSet vs)   = object [fromString "#set" .= map A.toJSON vs]
+  toJSON (VSeq vs)   = A.toJSON (map A.toJSON vs)
   toJSON (VTuple vs) = object [fromString "#tup" .= A.toJSON (map A.toJSON vs)]
   toJSON (VRecord m) = object [(fromText k, A.toJSON v) | (k, v) <- Map.toList m]
+  toJSON (VMap m)    = object [fromString "#map" .= map (\(k, v) -> [A.toJSON k, A.toJSON v]) (Map.toList m)]
+  toJSON (VVariant t v) = object
+    [ fromString "tag" .= t
+    , fromString "value" .= v
+    ]
+  toJSON (VUnserializable s) = object [fromString "#unserializable" .= s]
   toJSON VNull       = A.Null
