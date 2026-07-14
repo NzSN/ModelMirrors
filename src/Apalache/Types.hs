@@ -1,3 +1,6 @@
+-- Itftrace format:
+-- https://apalache-mc.org/docs/adr/015adr-trace.html#summary
+
 module Apalache.Types where
 
 import Data.Aeson (FromJSON, ToJSON, withObject, (.:), (.:?), (.=), (.!=), object)
