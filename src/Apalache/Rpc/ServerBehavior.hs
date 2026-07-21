@@ -191,7 +191,7 @@ replayTrace spec invs exports trace =
           case r of
             Left err -> permitted (Just expl) os (classifyResult err)
             Right (status, _)
-              | osPhase os /= T.pack "running" ->
+              | osPhase os `notElem` [T.pack "ready", T.pack "running"] ->
                   mismatch (Just expl) os (T.pack "checkInvariant ok in phase " <> osPhase os)
               | status == InvViolated ->
                   pure ( Just expl

@@ -128,11 +128,15 @@ ExplorerAdvance ==
 \* the session remains usable. Here "terminal" models the HARNESS policy
 \* (exploreUntilViolation) of stopping exploration once a counterexample
 \* is found, not a server-side session state.
+\*
+\* Note: verified against apalache 0.57.0 that the server ALSO accepts
+\* checkInvariant in "ready" (before any assumeTransition/nextStep) and
+\* answers SATISFIED/VIOLATED, hence the {"ready", "running"} guard.
 \* -----------------------------------------------------------------------------
 
 ExplorerCheckInvariant(iid) ==
-  /\ expPhase = "running"
-  /\ \/ /\ expPhase' = "running"
+  /\ expPhase \in {"ready", "running"}
+  /\ \/ /\ expPhase' = expPhase
         /\ action_taken' = "ExplorerCheckInvariant"
         /\ UNCHANGED <<expStep, expSnapshot, expPending>>
      \/ /\ expPhase' = "terminal"
