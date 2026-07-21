@@ -64,7 +64,13 @@ VARIABLE
   \* @type: Str;
   clLastResult,
   \* @type: Int;
-  clReqId
+  clReqId,
+  \* @type: Int;
+  clLastTid,    \* transition id of the last assumeTransition (NO_PENDING if none)
+  \* @type: Int;
+  clLastIid,    \* invariant id of the last checkInvariant (NO_PENDING if none)
+  \* @type: Int;
+  clLastSnap    \* snapshot id of the last rollback (NO_PENDING if none)
 
 \* -----------------------------------------------------------------------------
 \* Client: health
@@ -82,7 +88,8 @@ ClientHealth ==
   /\ \/ clLastResult' = RPC_OK
      \/ clLastResult' = RPC_HTTP_ERR
      \/ clLastResult' = RPC_PARSE_ERR
-  /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken, clSessionId>>
+  /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken, clSessionId,
+                  clLastTid, clLastIid, clLastSnap>>
 
 \* -----------------------------------------------------------------------------
 \* Client: loadSpec
@@ -106,6 +113,7 @@ ClientLoadSpec ==
         /\ clLastResult' = RPC_PROTO_ERR
      \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken, clSessionId>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PARSE_ERR}
+  /\ UNCHANGED <<clLastTid, clLastIid, clLastSnap>>
 
 \* -----------------------------------------------------------------------------
 \* Client: assumeTransition(tid)
@@ -126,6 +134,8 @@ ClientAssumeTransition(tid) ==
      \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
+  /\ clLastTid' = tid
+  /\ UNCHANGED <<clLastIid, clLastSnap>>
 
 \* -----------------------------------------------------------------------------
 \* Client: nextStep
@@ -146,6 +156,7 @@ ClientNextStep ==
      \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
+  /\ UNCHANGED <<clLastTid, clLastIid, clLastSnap>>
 
 \* -----------------------------------------------------------------------------
 \* Client: checkInvariant(iid)
@@ -161,6 +172,8 @@ ClientCheckInvariant(iid) ==
      \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
+  /\ clLastIid' = iid
+  /\ UNCHANGED <<clLastTid, clLastSnap>>
 
 \* -----------------------------------------------------------------------------
 \* Client: query
@@ -177,6 +190,7 @@ ClientQuery ==
      \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
+  /\ UNCHANGED <<clLastTid, clLastIid, clLastSnap>>
 
 \* -----------------------------------------------------------------------------
 \* Client: assumeState
@@ -195,6 +209,7 @@ ClientAssumeState ==
      \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
+  /\ UNCHANGED <<clLastTid, clLastIid, clLastSnap>>
 
 \* -----------------------------------------------------------------------------
 \* Client: rollback(snap)
@@ -211,6 +226,8 @@ ClientRollback(snap) ==
      \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
+  /\ clLastSnap' = snap
+  /\ UNCHANGED <<clLastTid, clLastIid>>
 
 \* -----------------------------------------------------------------------------
 \* Client: disposeSpec
@@ -231,6 +248,7 @@ ClientDispose ==
      \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
         /\ UNCHANGED clSessionId
+  /\ UNCHANGED <<clLastTid, clLastIid, clLastSnap>>
 
 \* -----------------------------------------------------------------------------
 \* Init
@@ -242,6 +260,9 @@ ClientInit ==
   /\ clLastMethod = "none"
   /\ clLastResult = "none"
   /\ clReqId = 1
+  /\ clLastTid = NO_PENDING
+  /\ clLastIid = NO_PENDING
+  /\ clLastSnap = NO_PENDING
 
 \* -----------------------------------------------------------------------------
 \* Next
@@ -264,7 +285,8 @@ ClientNext ==
 
 ClientSpec ==
   ClientInit /\ [][ClientNext]_<<expPhase, expStep, expSnapshot, expPending, action_taken,
-                                 clSessionId, clLastMethod, clLastResult, clReqId>>
+                                 clSessionId, clLastMethod, clLastResult, clReqId,
+                                 clLastTid, clLastIid, clLastSnap>>
 
 \* -----------------------------------------------------------------------------
 \* Invariants
@@ -303,6 +325,17 @@ ClientUntilSessionCall ==
   ~(clLastResult = RPC_OK
     /\ clLastMethod \in {"assumeTransition", "nextStep", "checkInvariant",
                          "query", "assumeState", "rollback"})
+
+\* Trace generation for ServerBehavior replay against a live server.
+\* ClientHappyNext prunes all error outcomes (they are nondeterministic
+\* and not replayable); ClientReplayTrace is then violated exactly once
+\* enough successful RPC calls have been made.
+\* Use with: --next=ClientHappyNext --inv=ClientReplayTrace
+ClientHappyNext ==
+  ClientNext /\ clLastResult' = RPC_OK
+
+ClientReplayTrace ==
+  clReqId <= 6
 
 \* View for trace inspection.
 ClientView == <<expPhase, clSessionId, clLastMethod, clLastResult, clReqId>>

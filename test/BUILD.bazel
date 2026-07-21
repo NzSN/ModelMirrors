@@ -9,6 +9,8 @@ haskell_test(
     ghcopts = ["-Wall", "-XGHC2024"],
     data = glob(["specs/*.tla"]) + [
         "//:specs/MirrorProtocol.tla",
+        "//:specs/AapalacheRPCProtocol.tla",
+        "//:specs/ApalacheRPCClient.tla",
         "//app:ModelMirrors",
     ],
     deps = [

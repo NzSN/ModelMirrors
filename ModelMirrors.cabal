@@ -70,6 +70,7 @@ library
         Apalache.Explorer,
         Apalache.Rpc.Types,
         Apalache.Rpc.Client,
+        Apalache.Rpc.ServerBehavior,
         Engine,
         Engine.Core,
         Engine.Replay,
@@ -146,6 +147,7 @@ test-suite ModelMirrors-test
     -- Modules included in this executable, other than Main.
     other-modules:
         Apalache.CommandSpec,
+        Apalache.ServerBehaviorSpec,
         Apalache.TraceSpec,
         Apalache.TypesSpec,
         ClientSpec,
