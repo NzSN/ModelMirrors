@@ -337,6 +337,28 @@ ClientHappyNext ==
 ClientReplayTrace ==
   clReqId <= 6
 
+\* Event-targeted falsy invariants: each is violated exactly when the
+\* named successful call first occurs, producing a trace that exercises
+\* that call. Use with --next=ClientHappyNext.
+ClientUntilAdvance ==
+  ~(clLastMethod = "nextStep" /\ clLastResult = RPC_OK)
+
+ClientUntilCheck ==
+  ~(clLastMethod = "checkInvariant" /\ clLastResult = RPC_OK)
+
+ClientUntilAssumeStateCall ==
+  ~(clLastMethod = "assumeState" /\ clLastResult = RPC_OK)
+
+ClientUntilRollback ==
+  ~(clLastMethod = "rollback" /\ clLastResult = RPC_OK)
+
+\* Violated by an assumeTransition whose outcome was DISABLED (the call
+\* succeeded but no transition is pending afterwards).
+ClientUntilDisabled ==
+  ~(clLastMethod = "assumeTransition"
+    /\ clLastResult = RPC_OK
+    /\ expPending = NO_PENDING)
+
 \* View for trace inspection.
 ClientView == <<expPhase, clSessionId, clLastMethod, clLastResult, clReqId>>
 
