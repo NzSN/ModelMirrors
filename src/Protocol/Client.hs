@@ -3,11 +3,14 @@ module Protocol.Client
   , runClient
   , runClientWithTraces
   , runClientGenTraces
+  , runClientExplore
+  , exploreSession
   , cannedClient
   , fixedClient
   , hourClockClient
   ) where
 
+import Apalache.Rpc.Types (ApalacheSpec)
 import Apalache.Types (ApalacheConfig, TraceGenerationConfig, ValidateResult (..), Value (..))
 import Data.IORef
 import Data.Map.Strict (Map)
@@ -54,6 +57,27 @@ runClientGenTraces client apCfg tc destPath = do
     Right (RegisterError e)                -> pure (Left e)
     Right (ProtocolError e)                -> pure (Left e)
     Right _                                -> pure (Left (T.pack "Unexpected message: expected GenTracesDone"))
+
+runClientExplore :: Transport t => Client t -> ApalacheSpec -> [Text] -> [Text] -> Int -> IO (Either Text ())
+runClientExplore client spec invs exports maxSteps = do
+  sendMsg (clientTransport client) (RegisterExplore spec invs exports maxSteps)
+  recvMsg (clientTransport client) >>= \case
+    Left err                               -> pure (Left (T.pack err))
+    Right (SpecValidated SpecValid)       -> stepLoop client
+    Right (SpecValidated (SpecInvalid e)) -> pure (Left e)
+    Right (RegisterError e)               -> pure (Left e)
+    Right (ProtocolError e)               -> pure (Left e)
+    Right _                                -> pure (Left (T.pack "Unexpected message: expected SpecValidated"))
+
+exploreSession :: Transport t => t -> ApalacheSpec -> [Text] -> [Text] -> IO (Either Text (Int, Int, Int))
+exploreSession t spec invs exports = do
+  sendMsg t (RegisterExploreSession spec invs exports)
+  recvMsg t >>= \case
+    Left err                       -> pure (Left (T.pack err))
+    Right (ExplorerReady a b c)    -> pure (Right (a, b, c))
+    Right (RegisterError e)        -> pure (Left e)
+    Right (ProtocolError e)        -> pure (Left e)
+    Right _                        -> pure (Left (T.pack "Unexpected message: expected ExplorerReady"))
 
 stepLoop :: Transport t => Client t -> IO (Either Text ())
 stepLoop client = do

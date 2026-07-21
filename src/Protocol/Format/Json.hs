@@ -27,6 +27,44 @@ instance ToJSON ClientMessage where
     , fromString "traceConfig" .= tc
     , fromString "destPath" .= dest
     ]
+  toJSON (RegisterExplore spec invs exports maxSteps) = object
+    [ fromString "proto_step" .= T.pack "register_explore"
+    , fromString "spec" .= spec
+    , fromString "invariants" .= invs
+    , fromString "exports" .= exports
+    , fromString "maxSteps" .= maxSteps
+    ]
+  toJSON (RegisterExploreSession spec invs exports) = object
+    [ fromString "proto_step" .= T.pack "register_explore_session"
+    , fromString "spec" .= spec
+    , fromString "invariants" .= invs
+    , fromString "exports" .= exports
+    ]
+  toJSON (ExploreAssumeTransition tid) = object
+    [ fromString "proto_step" .= T.pack "explore_assume_transition"
+    , fromString "transitionId" .= tid
+    ]
+  toJSON ExploreNextStep = object
+    [ fromString "proto_step" .= T.pack "explore_next_step"
+    ]
+  toJSON ExploreQueryState = object
+    [ fromString "proto_step" .= T.pack "explore_query_state"
+    ]
+  toJSON (ExploreCheckInvariant iid) = object
+    [ fromString "proto_step" .= T.pack "explore_check_invariant"
+    , fromString "invariantId" .= iid
+    ]
+  toJSON (ExploreAssumeState state) = object
+    [ fromString "proto_step" .= T.pack "explore_assume_state"
+    , fromString "state" .= state
+    ]
+  toJSON (ExploreRollback snap) = object
+    [ fromString "proto_step" .= T.pack "explore_rollback"
+    , fromString "snapshotId" .= snap
+    ]
+  toJSON ExploreDone = object
+    [ fromString "proto_step" .= T.pack "explore_done"
+    ]
   toJSON (ReportState state) = object
     [ fromString "proto_step" .= T.pack "report_state"
     , fromString "state" .= state
@@ -44,6 +82,29 @@ instance FromJSON ClientMessage where
           RegisterGenTraces <$> o .: fromString "apalacheConfig"
                             <*> o .: fromString "traceConfig"
                             <*> o .:? fromString "destPath" .!= Nothing
+      t | t == T.pack "register_explore" ->
+          RegisterExplore <$> o .: fromString "spec"
+                          <*> o .: fromString "invariants"
+                          <*> o .: fromString "exports"
+                          <*> o .:? fromString "maxSteps" .!= 10
+      t | t == T.pack "register_explore_session" ->
+          RegisterExploreSession <$> o .: fromString "spec"
+                                 <*> o .: fromString "invariants"
+                                 <*> o .: fromString "exports"
+      t | t == T.pack "explore_assume_transition" ->
+          ExploreAssumeTransition <$> o .: fromString "transitionId"
+      t | t == T.pack "explore_next_step" ->
+          pure ExploreNextStep
+      t | t == T.pack "explore_query_state" ->
+          pure ExploreQueryState
+      t | t == T.pack "explore_check_invariant" ->
+          ExploreCheckInvariant <$> o .: fromString "invariantId"
+      t | t == T.pack "explore_assume_state" ->
+          ExploreAssumeState <$> o .: fromString "state"
+      t | t == T.pack "explore_rollback" ->
+          ExploreRollback <$> o .: fromString "snapshotId"
+      t | t == T.pack "explore_done" ->
+          pure ExploreDone
       t | t == T.pack "report_state" ->
           ReportState <$> o .: fromString "state"
       _ ->
@@ -87,6 +148,39 @@ instance ToJSON MirrorMessage where
     [ fromString "proto_step" .= T.pack "protocol_error"
     , fromString "error" .= err
     ]
+  toJSON (ExplorerReady nInit nNext nInv) = object
+    [ fromString "proto_step" .= T.pack "explorer_ready"
+    , fromString "initTransitions" .= nInit
+    , fromString "nextTransitions" .= nNext
+    , fromString "stateInvariants" .= nInv
+    ]
+  toJSON (ExploreTransitionStatus status) = object
+    [ fromString "proto_step" .= T.pack "explore_transition_status"
+    , fromString "status" .= status
+    ]
+  toJSON (ExploreStepDone stepNo) = object
+    [ fromString "proto_step" .= T.pack "explore_step_done"
+    , fromString "stepNo" .= stepNo
+    ]
+  toJSON (ExploreState state) = object
+    [ fromString "proto_step" .= T.pack "explore_state"
+    , fromString "state" .= state
+    ]
+  toJSON (ExploreInvariantStatus status) = object
+    [ fromString "proto_step" .= T.pack "explore_invariant_status"
+    , fromString "status" .= status
+    ]
+  toJSON (ExploreAssumeStatus status) = object
+    [ fromString "proto_step" .= T.pack "explore_assume_status"
+    , fromString "status" .= status
+    ]
+  toJSON (ExploreRollbackDone snap) = object
+    [ fromString "proto_step" .= T.pack "explore_rollback_done"
+    , fromString "snapshotId" .= snap
+    ]
+  toJSON ExploreSessionDone = object
+    [ fromString "proto_step" .= T.pack "explore_session_done"
+    ]
 
 instance FromJSON MirrorMessage where
   parseJSON = withObject "MirrorMessage" $ \o -> do
@@ -110,5 +204,23 @@ instance FromJSON MirrorMessage where
           ProtocolError <$> o .: fromString "error"
       t | t == T.pack "register_error" ->
           RegisterError <$> o .: fromString "error"
+      t | t == T.pack "explorer_ready" ->
+          ExplorerReady <$> o .: fromString "initTransitions"
+                        <*> o .: fromString "nextTransitions"
+                        <*> o .: fromString "stateInvariants"
+      t | t == T.pack "explore_transition_status" ->
+          ExploreTransitionStatus <$> o .: fromString "status"
+      t | t == T.pack "explore_step_done" ->
+          ExploreStepDone <$> o .: fromString "stepNo"
+      t | t == T.pack "explore_state" ->
+          ExploreState <$> o .: fromString "state"
+      t | t == T.pack "explore_invariant_status" ->
+          ExploreInvariantStatus <$> o .: fromString "status"
+      t | t == T.pack "explore_assume_status" ->
+          ExploreAssumeStatus <$> o .: fromString "status"
+      t | t == T.pack "explore_rollback_done" ->
+          ExploreRollbackDone <$> o .: fromString "snapshotId"
+      t | t == T.pack "explore_session_done" ->
+          pure ExploreSessionDone
       _ ->
           fail $ "Unknown MirrorMessage tag: " ++ T.unpack tag

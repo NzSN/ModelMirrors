@@ -7,16 +7,45 @@ module Protocol.Mirror
   , MkRunMirror (..)
   , MkRunMirrorWithTraces (..)
   , MkRunMirrorGenTraces (..)
+  , MkExploreMirror (..)
+  , MkExploreSession (..)
   , MkReplayAll (..)
   , MkReplayOne (..)
   , replaySteps
   , runMirror
   , runMirrorWithTraces
   , runMirrorGenTraces
+  , runMirrorExplore
+  , runMirrorExploreSession
   , run
   ) where
 
 import Apalache.Command (generateTraceFiles, generateTraces)
+import Apalache.Explorer
+  ( Explorer (..)
+  , exploreAssumeState
+  , exploreCheck
+  , exploreDispose
+  , exploreInit
+  , exploreNext
+  , exploreQueryState
+  , newExplorer
+  , withApalacheServer
+  )
+import Apalache.Rpc.Client (assumeTransition, nextStep, rollback)
+import Apalache.Rpc.Types
+  ( ApalacheSpec
+  , AssumeTransitionParams (..)
+  , AssumeTransitionResult (..)
+  , InvariantKind (..)
+  , InvariantStatus (..)
+  , NextStateParams (..)
+  , NextStateResult (..)
+  , RollbackParams (..)
+  , RpcError
+  , SpecParams (..)
+  , TransitionStatus (..)
+  )
 import Apalache.Trace (findTraceFiles, readTrace)
 import Apalache.Types
     ( ApalacheConfig (..)
@@ -25,11 +54,12 @@ import Apalache.Types
     , TraceGenerationConfig (..)
     , TraceGenerationResult (..)
     , ValidateResult (..)
-    , Value
+    , Value (..)
     , applyParamVars
     )
 import Control.Monad (forM_)
 import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Engine.Core (diffState, traceSteps)
@@ -47,10 +77,15 @@ data MirrorStep
   = MirrorRecvRegister !ApalacheConfig !TraceGenerationConfig
   | MirrorRecvRegisterTraces !ApalacheConfig ![FilePath]
   | MirrorRecvRegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath)
+  | MirrorRecvRegisterExplore !ApalacheSpec ![Text] ![Text] !Int
+  | MirrorRecvRegisterExploreSession !ApalacheSpec ![Text] ![Text]
+  | MirrorRecvExploreCmd !Text
   | MirrorRecvReportState !Int !Text
   | MirrorSendGenTracesDone ![FilePath]
   | MirrorSendSpecValidatedValid
   | MirrorSendSpecValidatedInvalid !Text
+  | MirrorSendExplorerReady
+  | MirrorSendExploreResult !Text
   | MirrorSendRegisterError !Text
   | MirrorSendProtocolError !Text
   | MirrorSendInitialState !Text !(Map Text Value)
@@ -65,10 +100,15 @@ mirrorStepActionName = \case
   MirrorRecvRegister{}            -> T.pack "MirrorRecvRegister"
   MirrorRecvRegisterTraces{}      -> T.pack "MirrorRecvRegisterTraces"
   MirrorRecvRegisterGenTraces{}   -> T.pack "MirrorRecvRegisterGenTraces"
+  MirrorRecvRegisterExplore{}     -> T.pack "MirrorRecvRegisterExplore"
+  MirrorRecvRegisterExploreSession{} -> T.pack "MirrorRecvRegisterExploreSession"
+  MirrorRecvExploreCmd{}          -> T.pack "MirrorRecvExploreCmd"
   MirrorRecvReportState{}         -> T.pack "MirrorRecvReportState"
   MirrorSendGenTracesDone{}       -> T.pack "MirrorSendGenTracesDone"
   MirrorSendSpecValidatedValid    -> T.pack "MirrorSendSpecValidatedValid"
   MirrorSendSpecValidatedInvalid{}-> T.pack "MirrorSendSpecValidatedInvalid"
+  MirrorSendExplorerReady         -> T.pack "MirrorSendExplorerReady"
+  MirrorSendExploreResult{}       -> T.pack "MirrorSendExploreResult"
   MirrorSendRegisterError{}       -> T.pack "MirrorSendRegisterError"
   MirrorSendProtocolError{}       -> T.pack "MirrorSendProtocolError"
   MirrorSendInitialState{}        -> T.pack "MirrorSendInitialState"
@@ -92,6 +132,8 @@ data RecvMsg t = RecvMsg t
 data MkRunMirror t = MkRunMirror t ApalacheConfig TraceGenerationConfig
 data MkRunMirrorWithTraces t = MkRunMirrorWithTraces t ApalacheConfig [FilePath]
 data MkRunMirrorGenTraces t = MkRunMirrorGenTraces t ApalacheConfig TraceGenerationConfig (Maybe FilePath)
+data MkExploreMirror t = MkExploreMirror t ApalacheSpec [Text] [Text] Int
+data MkExploreSession t = MkExploreSession t ApalacheSpec [Text] [Text]
 data MkReplayAll t = MkReplayAll t (StateDriver IO) [ItfTrace]
 data MkReplayOne t = MkReplayOne t (StateDriver IO) ItfTrace
 
@@ -111,6 +153,12 @@ instance Transport t => Step (RecvMsg t) where
       Right (RegisterGenTraces apCfg tc destPath) -> do
         steps <- exec (MkRunMirrorGenTraces transport apCfg tc destPath)
         pure (MirrorRecvRegisterGenTraces apCfg tc destPath : steps)
+      Right (RegisterExplore spec invs exports maxSteps) -> do
+        steps <- exec (MkExploreMirror transport spec invs exports maxSteps)
+        pure (MirrorRecvRegisterExplore spec invs exports maxSteps : steps)
+      Right (RegisterExploreSession spec invs exports) -> do
+        steps <- exec (MkExploreSession transport spec invs exports)
+        pure (MirrorRecvRegisterExploreSession spec invs exports : steps)
       Right _ -> do
         sendMsg transport (ProtocolError (T.pack "Expected Register message"))
         pure [MirrorSendProtocolError (T.pack "Expected Register message")]
@@ -173,6 +221,191 @@ instance Transport t => Step (MkRunMirrorGenTraces t) where
         sendMsg transport (GenTracesDone finalPaths)
         pure [MirrorSendGenTracesDone finalPaths]
 
+instance Transport t => Step (MkExploreMirror t) where
+  exec (MkExploreMirror transport spec invs exports maxSteps) =
+    withApalacheServer Nothing $ \server -> do
+      explRes <- newExplorer server spec invs exports
+      case explRes of
+        Left err -> do
+          let msg = rpcErrorText err
+          sendMsg transport (RegisterError msg)
+          pure [MirrorSendRegisterError msg]
+        Right expl0 -> do
+          initRes <- exploreInit expl0
+          case initRes of
+            Left err -> do
+              let msg = rpcErrorText err
+              sendMsg transport (ProtocolError msg)
+              pure [MirrorSendProtocolError msg]
+            Right expl1 -> do
+              sendMsg transport (SpecValidated SpecValid)
+              (MirrorSendSpecValidatedValid :) <$> exploreLoop expl1 0
+    where
+      exploreLoop expl stepIdx = do
+        stateRes <- exploreQueryState expl
+        case stateRes of
+          Left err -> do
+            let msg = rpcErrorText err
+            sendMsg transport (ProtocolError msg)
+            pure [MirrorSendProtocolError msg]
+          Right expected -> do
+            let action = stateAction expected
+                sendStep
+                  | stepIdx == 0 = MirrorSendInitialState action expected
+                  | otherwise    = MirrorSendNextStep action expected
+            if stepIdx == 0
+              then sendMsg transport (InitialState action expected)
+              else sendMsg transport (NextStep action expected)
+            resp <- recvMsg transport
+            case resp of
+              Left err -> do
+                sendMsg transport (ProtocolError (T.pack err))
+                pure [sendStep, MirrorSendProtocolError (T.pack err)]
+              Right (ReportState actual) -> do
+                let diff = diffState expected actual
+                    recvStep = MirrorRecvReportState stepIdx action
+                case diff of
+                  StateMismatch e a _ -> do
+                    sendMsg transport (StepMismatch e a)
+                    pure [sendStep, recvStep, MirrorSendStepMismatch stepIdx diff]
+                  StatesMatch -> do
+                    asRes <- exploreAssumeState expl actual
+                    case asRes of
+                      Left err -> do
+                        let msg = rpcErrorText err
+                        sendMsg transport (ProtocolError msg)
+                        pure [sendStep, recvStep, MirrorSendProtocolError msg]
+                      Right (expl', _) -> do
+                        sendMsg transport StepOk
+                        violated <- invariantViolated expl'
+                        if violated
+                          then do
+                            sendMsg transport (StepMismatch Map.empty Map.empty)
+                            pure [ sendStep, recvStep, MirrorSendStepOk stepIdx
+                                 , MirrorSendStepMismatch stepIdx
+                                     (StateMismatch Map.empty Map.empty []) ]
+                          else if stepIdx + 1 >= maxSteps
+                            then do
+                              sendMsg transport AllStepsDone
+                              pure [sendStep, recvStep, MirrorSendStepOk stepIdx, MirrorSendAllStepsDone]
+                            else do
+                              nxt <- exploreNext expl' 0
+                              case nxt of
+                                Left err -> do
+                                  let msg = rpcErrorText err
+                                  sendMsg transport (ProtocolError msg)
+                                  pure [sendStep, recvStep, MirrorSendStepOk stepIdx
+                                       , MirrorSendProtocolError msg]
+                                Right (_, TransDisabled) -> do
+                                  sendMsg transport AllStepsDone
+                                  pure [sendStep, recvStep, MirrorSendStepOk stepIdx
+                                       , MirrorSendAllStepsDone]
+                                Right (expl'', _) -> do
+                                  rest <- exploreLoop expl'' (stepIdx + 1)
+                                  pure (sendStep : recvStep : MirrorSendStepOk stepIdx : rest)
+              Right _ -> do
+                sendMsg transport (ProtocolError (T.pack "expected ReportState"))
+                pure [sendStep, MirrorSendProtocolError (T.pack "expected ReportState")]
+      invariantViolated expl
+        | null invs = pure False
+        | otherwise = do
+            r <- exploreCheck expl 0 StateInvariant
+            pure $ case r of
+              Right (InvViolated, _) -> True
+              _ -> False
+      stateAction expected = case Map.lookup (T.pack "action_taken") expected of
+        Just (VStr a) -> a
+        _             -> T.pack "explore"
+
+rpcErrorText :: RpcError -> Text
+rpcErrorText = T.pack . show
+
+transitionStatusText :: TransitionStatus -> Text
+transitionStatusText TransEnabled  = T.pack "ENABLED"
+transitionStatusText TransDisabled = T.pack "DISABLED"
+transitionStatusText TransUnknown  = T.pack "UNKNOWN"
+
+invariantStatusText :: InvariantStatus -> Text
+invariantStatusText InvSatisfied = T.pack "SATISFIED"
+invariantStatusText InvViolated  = T.pack "VIOLATED"
+invariantStatusText InvUnknown   = T.pack "UNKNOWN"
+
+instance Transport t => Step (MkExploreSession t) where
+  exec (MkExploreSession transport spec invs exports) =
+    withApalacheServer Nothing $ \server -> do
+      explRes <- newExplorer server spec invs exports
+      case explRes of
+        Left err -> do
+          let msg = rpcErrorText err
+          sendMsg transport (RegisterError msg)
+          pure [MirrorSendRegisterError msg]
+        Right expl0 -> do
+          let params = explParams expl0
+          sendMsg transport $ ExplorerReady
+            (length (spInitTransitions params))
+            (length (spNextTransitions params))
+            (length (spStateInvariants params))
+          (MirrorSendExplorerReady :) <$> sessionLoop expl0
+    where
+      sessionLoop expl = do
+        msg <- recvMsg transport
+        case msg of
+          Left err -> do
+            sendMsg transport (ProtocolError (T.pack err))
+            pure [MirrorSendProtocolError (T.pack err)]
+          Right ExploreDone -> do
+            _ <- exploreDispose expl
+            sendMsg transport ExploreSessionDone
+            pure [MirrorRecvExploreCmd (T.pack "done"), MirrorSendExploreResult (T.pack "done")]
+          Right (ExploreAssumeTransition tid) ->
+            cmd (T.pack "assumeTransition") expl $ do
+              r <- assumeTransition (explClient expl)
+                    (AssumeTransitionParams (explSessionId expl) tid True Nothing)
+              pure $ flip fmap r $ \atr ->
+                let st = transitionStatusText (atrStatus atr)
+                in (expl { explSnap = atrSnapshotId atr }, ExploreTransitionStatus st, st)
+          Right ExploreNextStep ->
+            cmd (T.pack "nextStep") expl $ do
+              r <- nextStep (explClient expl) (NextStateParams (explSessionId expl))
+              pure $ flip fmap r $ \nsr ->
+                (expl { explSnap = nsrSnapshotId nsr }, ExploreStepDone (nsrNewStepNo nsr), T.pack "ok")
+          Right ExploreQueryState ->
+            cmd (T.pack "query") expl $ do
+              r <- exploreQueryState expl
+              pure $ flip fmap r $ \st -> (expl, ExploreState st, T.pack "ok")
+          Right (ExploreCheckInvariant iid) ->
+            cmd (T.pack "checkInvariant") expl $ do
+              r <- exploreCheck expl iid StateInvariant
+              pure $ flip fmap r $ \(st, _) ->
+                let s = invariantStatusText st
+                in (expl, ExploreInvariantStatus s, s)
+          Right (ExploreAssumeState eqs) ->
+            cmd (T.pack "assumeState") expl $ do
+              r <- exploreAssumeState expl eqs
+              pure $ flip fmap r $ \(expl', st) ->
+                let s = transitionStatusText st
+                in (expl', ExploreAssumeStatus s, s)
+          Right (ExploreRollback snap) ->
+            cmd (T.pack "rollback") expl $ do
+              r <- rollback (explClient expl) (RollbackParams (explSessionId expl) snap)
+              pure $ flip fmap r $ \() ->
+                (expl { explSnap = snap }, ExploreRollbackDone snap, T.pack "ok")
+          Right _ -> do
+            sendMsg transport (ProtocolError (T.pack "unexpected message in explore session"))
+            pure [MirrorSendProtocolError (T.pack "unexpected message in explore session")]
+      cmd name expl action = do
+        r <- action
+        case r of
+          Left err -> do
+            let msg = rpcErrorText err
+            sendMsg transport (ProtocolError msg)
+            rest <- sessionLoop expl
+            pure (MirrorRecvExploreCmd name : MirrorSendProtocolError msg : rest)
+          Right (expl', resultMsg, resultName) -> do
+            sendMsg transport resultMsg
+            rest <- sessionLoop expl'
+            pure (MirrorRecvExploreCmd name : MirrorSendExploreResult resultName : rest)
+
 instance Transport t => Step (MkReplayAll t) where
   exec (MkReplayAll _ _ []) = pure []
   exec (MkReplayAll transport driver (t : ts)) = do
@@ -222,6 +455,14 @@ runMirrorWithTraces transport cfg traces = exec (MkRunMirrorWithTraces transport
 
 runMirrorGenTraces :: Transport t => t -> ApalacheConfig -> TraceGenerationConfig -> Maybe FilePath -> IO [MirrorStep]
 runMirrorGenTraces transport cfg tc destPath = exec (MkRunMirrorGenTraces transport cfg tc destPath)
+
+runMirrorExplore :: Transport t => t -> ApalacheSpec -> [Text] -> [Text] -> Int -> IO [MirrorStep]
+runMirrorExplore transport spec invs exports maxSteps =
+  exec (MkExploreMirror transport spec invs exports maxSteps)
+
+runMirrorExploreSession :: Transport t => t -> ApalacheSpec -> [Text] -> [Text] -> IO [MirrorStep]
+runMirrorExploreSession transport spec invs exports =
+  exec (MkExploreSession transport spec invs exports)
 
 run :: Transport t => t -> IO [MirrorStep]
 run = exec . RecvMsg

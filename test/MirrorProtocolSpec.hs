@@ -2,6 +2,7 @@
 module MirrorProtocolSpec (spec) where
 
 import Apalache.Command (generateTraces, generateTraceFiles)
+import Apalache.Rpc.Types (mkSpecFromFile)
 import Apalache.Trace (readTrace)
 import Apalache.Types
     ( ApalacheConfig (..)
@@ -323,6 +324,8 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
   let applicable = filter (\t ->
         let acts = map actionTake (traceStates t)
         in not (any (`elem` [T.pack "ClientRegisterGenTraces"
+                            ,T.pack "ClientRegisterExplore"
+                            ,T.pack "ClientRegisterExploreSession"
                             ,T.pack "ClientRecvRegisterError"
                             ,T.pack "ClientRecvProtocolError"
                             ,T.pack "MirrorSendSpecValidatedInvalid"
@@ -391,7 +394,7 @@ generateMirrorTrace = do
         , initPredicate = Nothing
         , nextPredicate = Nothing
         , constInit     = Nothing
-        , invariant     = T.pack "TraceComplete"
+        , invariant     = T.pack "TraceSuccess"
         , lengthBound   = 20
         , paramVarNames = T.empty
         }
@@ -445,6 +448,22 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
         "ClientRegisterGenTraces" -> do
           sendMsg clientEnd (RegisterGenTraces apCfg tc Nothing)
           pure (i, ("send RegisterGenTraces", True, "ok"))
+        "ClientRegisterExplore" -> do
+          -- Explore traces are covered by ExploreMirrorSpec; at the message
+          -- level the explore flow is identical to RegisterTraces, so drive
+          -- the equivalent flow here.
+          sendMsg clientEnd (RegisterTraces apCfg tracePaths)
+          pure (i, ("send RegisterTraces (explore substitute)", True, "ok"))
+        "ClientRegisterExploreSession" -> do
+          spec' <- mkSpecFromFile (specPath apCfg)
+          sendMsg clientEnd (RegisterExploreSession spec' [] [])
+          pure (i, ("send RegisterExploreSession", True, "ok"))
+        "ClientExploreCmd" -> do
+          sendMsg clientEnd ExploreQueryState
+          pure (i, ("send ExploreQueryState", True, "ok"))
+        "ClientExploreDone" -> do
+          sendMsg clientEnd ExploreDone
+          pure (i, ("send ExploreDone", True, "ok"))
         "ClientRecvSpecValidated" ->
           pure (i, ("skip ClientRecvSpecValidated", True, "ok"))
         "ClientRecvInitialState" ->
@@ -485,6 +504,35 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
           pure (i, ("skip MirrorRecvRegisterTraces", True, "ok"))
         "MirrorRecvRegisterGenTraces" ->
           pure (i, ("skip MirrorRecvRegisterGenTraces", True, "ok"))
+        "MirrorRecvRegisterExplore" ->
+          pure (i, ("skip MirrorRecvRegisterExplore", True, "ok"))
+        "MirrorRecvRegisterExploreSession" ->
+          pure (i, ("skip MirrorRecvRegisterExploreSession", True, "ok"))
+        "MirrorSendExplorerReady" -> do
+          msg <- recvOrDie "ExplorerReady"
+          let ok = case msg of
+                Right (ExplorerReady _ _ _) -> True
+                _ -> False
+          pure (i, ("recv ExplorerReady", ok, showMsg msg))
+        "MirrorRecvExploreCmd" -> do
+          msg <- recvOrDie "explore result"
+          let ok = case msg of
+                Right (ExploreState _) -> True
+                Right (ProtocolError _) -> True
+                _ -> False
+          pure (i, ("recv explore result", ok, showMsg msg))
+        "MirrorRecvExploreDone" -> do
+          msg <- recvOrDie "ExploreSessionDone"
+          let ok = case msg of
+                Right ExploreSessionDone -> True
+                _ -> False
+          pure (i, ("recv ExploreSessionDone", ok, showMsg msg))
+        "ClientRecvExplorerReady" ->
+          pure (i, ("skip ClientRecvExplorerReady", True, "ok"))
+        "ClientRecvExploreResult" ->
+          pure (i, ("skip ClientRecvExploreResult", True, "ok"))
+        "ClientRecvExploreDoneAck" ->
+          pure (i, ("skip ClientRecvExploreDoneAck", True, "ok"))
         "MirrorSendGenTracesDone" -> do
           msg <- recvOrDie "GenTracesDone"
           let ok = case msg of

@@ -6,6 +6,7 @@ import qualified Apalache.TraceSpec as TraceSpec
 import qualified Apalache.TypesSpec as TypesSpec
 import qualified ClientSpec
 import qualified EngineSpec
+import qualified ExploreMirrorSpec
 import qualified MainSpec
 import qualified MinimalTraceCheckSpec
 import qualified MirrorProtocolSpec
@@ -24,4 +25,5 @@ main = defaultMain $ testGroup "ModelMirrors"
   , MirrorStepSpec.spec
   , MinimalTraceCheckSpec.spec
   , ServerBehaviorSpec.spec
+  , ExploreMirrorSpec.spec
   ]

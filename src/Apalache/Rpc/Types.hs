@@ -104,7 +104,14 @@ data RpcClient = RpcClient
 
 newtype ApalacheSpec = ApalacheSpec
   { getSpecSources :: [Text]
-  }
+  } deriving (Show, Eq)
+
+instance ToJSON ApalacheSpec where
+  toJSON s = object [ "sources" .= getSpecSources s ]
+
+instance FromJSON ApalacheSpec where
+  parseJSON = withObject "ApalacheSpec" $ \o ->
+    ApalacheSpec <$> o .: "sources"
 
 mkSpecFromFile :: FilePath -> IO ApalacheSpec
 mkSpecFromFile path = ApalacheSpec . pure <$> TIO.readFile path
