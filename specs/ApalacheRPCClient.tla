@@ -20,6 +20,15 @@ EXTENDS Integers, AapalacheRPCProtocol
 \*   - clLastResult : the result of the last call
 \*   - clReqId      : a monotonically increasing JSON-RPC request id
 \*
+\* Scope: a SINGLE session at a time is modeled (MaxSessions = 1). The real
+\* server supports concurrent sessions; that is out of scope for this oracle.
+\*
+\* assumeTransition and nextStep are modeled as separate calls, mirroring
+\* the real API: a successful assumeTransition records the pending
+\* transition in expPending (ENABLED) or not (DISABLED), and nextStep is
+\* only meaningful while a transition is pending — calling it otherwise
+\* yields a server protocol error.
+\*
 \* Wire details (HTTP, JSON parsing, Manager) are NOT modeled.
 \* Integration tests against a real apalache-mc server verify that the
 \* implementation's behavior is consistent with these oracle rules.
@@ -31,7 +40,8 @@ EXTENDS Integers, AapalacheRPCProtocol
 
 \* Session-ID sentinel: no active session.
 NO_SESSION == 0
-MaxSessions == 3
+\* Single-session scope (see module header).
+MaxSessions == 1
 
 \* -----------------------------------------------------------------------------
 \* Client-observable result kinds
@@ -72,55 +82,68 @@ ClientHealth ==
   /\ \/ clLastResult' = RPC_OK
      \/ clLastResult' = RPC_HTTP_ERR
      \/ clLastResult' = RPC_PARSE_ERR
-  /\ UNCHANGED <<expPhase, expStep, expSnapshot, action_taken, clSessionId>>
+  /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken, clSessionId>>
 
 \* -----------------------------------------------------------------------------
 \* Client: loadSpec
 \*
 \* Loads a TLA+ specification.  On success the server creates a session and
-\* the client captures the session id.
+\* the client captures the session id.  If the server rejects the spec
+\* (parse error, missing operators, etc.) the call returns a protocol
+\* error and NO session is created.
 \*
-\* Maps to ExplorerLoadSpec on success.
+\* Maps to ExplorerLoadSpec.
 \* -----------------------------------------------------------------------------
 
 ClientLoadSpec ==
   /\ clLastMethod' = "loadSpec"
   /\ clReqId' = clReqId + 1
-  /\ \/ /\ ExplorerLoadSpec
+  /\ \/ /\ ExplorerLoadSpec /\ expPhase' = "ready"
         /\ \E sid \in 1 .. MaxSessions : clSessionId' = sid
         /\ clLastResult' = RPC_OK
-     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, action_taken, clSessionId>>
-        /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
+     \/ /\ ExplorerLoadSpec /\ expPhase' = "terminal"
+        /\ clSessionId' = NO_SESSION
+        /\ clLastResult' = RPC_PROTO_ERR
+     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken, clSessionId>>
+        /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PARSE_ERR}
 
 \* -----------------------------------------------------------------------------
-\* Client: assumeTransition(tid) + nextStep
+\* Client: assumeTransition(tid)
 \*
-\* These two client calls are modeled together as ExplorerStep(tid) since the
-\* protocol oracle treats the "assume transition then advance" sequence as a
-\* single composite operation.
-\*
-\* ClientAssumeTransition  – picks a transition; maps to ExplorerStep(tid)
-\* ClientNextStep          – advances from the previously-assumed transition;
-\*                           maps to ExplorerStep with nondeterministic tid
-\*                           (the server already knows which transition was
-\*                           assumed)
+\* Maps to ExplorerAssume.  An ENABLED outcome records tid in expPending
+\* (observable in the model state); a DISABLED outcome leaves expPending
+\* at NO_PENDING.  Both are transport-level successes (RPC_OK).  A
+\* server-side internal error ("terminal") surfaces as a protocol error.
 \* -----------------------------------------------------------------------------
 
 ClientAssumeTransition(tid) ==
   /\ clLastMethod' = "assumeTransition"
   /\ clReqId' = clReqId + 1
-  /\ \/ /\ ExplorerStep(tid)
+  /\ \/ /\ ExplorerAssume(tid) /\ expPhase' /= "terminal"
         /\ clLastResult' = RPC_OK
-     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, action_taken>>
-        /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
+     \/ /\ ExplorerAssume(tid) /\ expPhase' = "terminal"
+        /\ clLastResult' = RPC_PROTO_ERR
+     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
+        /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
+
+\* -----------------------------------------------------------------------------
+\* Client: nextStep
+\*
+\* Maps to ExplorerAdvance, which requires a pending (ENABLED) transition.
+\* Calling nextStep with nothing pending makes ExplorerAdvance disabled,
+\* so only the error branch can fire — modeling the server's protocol
+\* error response.
+\* -----------------------------------------------------------------------------
 
 ClientNextStep ==
   /\ clLastMethod' = "nextStep"
   /\ clReqId' = clReqId + 1
-  /\ \/ /\ \E tid \in 0 .. MaxTransitions : ExplorerStep(tid)
+  /\ \/ /\ ExplorerAdvance /\ expPhase' /= "terminal"
         /\ clLastResult' = RPC_OK
-     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, action_taken>>
+     \/ /\ ExplorerAdvance /\ expPhase' = "terminal"
+        /\ clLastResult' = RPC_PROTO_ERR
+     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
 
@@ -135,7 +158,7 @@ ClientCheckInvariant(iid) ==
   /\ clReqId' = clReqId + 1
   /\ \/ /\ ExplorerCheckInvariant(iid)
         /\ clLastResult' = RPC_OK
-     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, action_taken>>
+     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
 
@@ -151,7 +174,7 @@ ClientQuery ==
   /\ clReqId' = clReqId + 1
   /\ \/ /\ ExplorerQuery
         /\ clLastResult' = RPC_OK
-     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, action_taken>>
+     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
 
@@ -165,10 +188,12 @@ ClientQuery ==
 ClientAssumeState ==
   /\ clLastMethod' = "assumeState"
   /\ clReqId' = clReqId + 1
-  /\ \/ /\ ExplorerAssumeState
+  /\ \/ /\ ExplorerAssumeState /\ expPhase' /= "terminal"
         /\ clLastResult' = RPC_OK
-     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, action_taken>>
-        /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
+     \/ /\ ExplorerAssumeState /\ expPhase' = "terminal"
+        /\ clLastResult' = RPC_PROTO_ERR
+     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
+        /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
 
 \* -----------------------------------------------------------------------------
@@ -183,7 +208,7 @@ ClientRollback(snap) ==
   /\ clReqId' = clReqId + 1
   /\ \/ /\ ExplorerRollback(snap)
         /\ clLastResult' = RPC_OK
-     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, action_taken>>
+     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
   /\ UNCHANGED clSessionId
 
@@ -203,7 +228,7 @@ ClientDispose ==
   /\ \/ /\ ExplorerDispose
         /\ clSessionId' = NO_SESSION
         /\ clLastResult' = RPC_OK
-     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, action_taken>>
+     \/ /\ UNCHANGED <<expPhase, expStep, expSnapshot, expPending, action_taken>>
         /\ clLastResult' \in {RPC_HTTP_ERR, RPC_PROTO_ERR, RPC_PARSE_ERR}
         /\ UNCHANGED clSessionId
 
@@ -238,8 +263,8 @@ ClientNext ==
 \* -----------------------------------------------------------------------------
 
 ClientSpec ==
-  ClientInit /\ [][ClientNext]_<<expPhase, expStep, expSnapshot, action_taken,
-                                clSessionId, clLastMethod, clLastResult, clReqId>>
+  ClientInit /\ [][ClientNext]_<<expPhase, expStep, expSnapshot, expPending, action_taken,
+                                 clSessionId, clLastMethod, clLastResult, clReqId>>
 
 \* -----------------------------------------------------------------------------
 \* Invariants
@@ -271,10 +296,13 @@ ClientInv ==
 \* Trace generation invariants (for apalache counterexample generation)
 \* -----------------------------------------------------------------------------
 
-\* Force the trace to include at least one session-dependent operation.
+\* Force the trace to include at least one SUCCESSFUL session-dependent call.
+\* (Without the RPC_OK conjunct, the invariant is violated by any gated call
+\* attempted before a session exists, yielding trivial 1-step traces.)
 ClientUntilSessionCall ==
-  clLastMethod \notin {"assumeTransition", "nextStep", "checkInvariant",
-                       "query", "assumeState", "rollback", "disposeSpec"}
+  ~(clLastResult = RPC_OK
+    /\ clLastMethod \in {"assumeTransition", "nextStep", "checkInvariant",
+                         "query", "assumeState", "rollback"})
 
 \* View for trace inspection.
 ClientView == <<expPhase, clSessionId, clLastMethod, clLastResult, clReqId>>
