@@ -1,8 +1,10 @@
 module Protocol.Client
   ( Client (..)
   , runClient
+  , runClientWithSpec
   , runClientWithTraces
   , runClientGenTraces
+  , runClientGenTracesWithSpec
   , runClientExplore
   , exploreSession
   , cannedClient
@@ -27,8 +29,11 @@ data Client t = Client
   }
 
 runClient :: Transport t => Client t -> ApalacheConfig -> TraceGenerationConfig -> IO (Either Text ())
-runClient client apCfg tc = do
-  sendMsg (clientTransport client) (Register apCfg tc)
+runClient client apCfg tc = runClientWithSpec client apCfg tc Nothing
+
+runClientWithSpec :: Transport t => Client t -> ApalacheConfig -> TraceGenerationConfig -> Maybe ApalacheSpec -> IO (Either Text ())
+runClientWithSpec client apCfg tc mSpec = do
+  sendMsg (clientTransport client) (Register apCfg tc mSpec)
   recvMsg (clientTransport client) >>= \case
     Left err                               -> pure (Left (T.pack err))
     Right (SpecValidated SpecValid)       -> stepLoop client
@@ -49,8 +54,11 @@ runClientWithTraces client apCfg traces = do
     Right _                                -> pure (Left (T.pack "Unexpected message: expected SpecValidated"))
 
 runClientGenTraces :: Transport t => Client t -> ApalacheConfig -> TraceGenerationConfig -> Maybe FilePath -> IO (Either Text ())
-runClientGenTraces client apCfg tc destPath = do
-  sendMsg (clientTransport client) (RegisterGenTraces apCfg tc destPath)
+runClientGenTraces client apCfg tc destPath = runClientGenTracesWithSpec client apCfg tc destPath Nothing
+
+runClientGenTracesWithSpec :: Transport t => Client t -> ApalacheConfig -> TraceGenerationConfig -> Maybe FilePath -> Maybe ApalacheSpec -> IO (Either Text ())
+runClientGenTracesWithSpec client apCfg tc destPath mSpec = do
+  sendMsg (clientTransport client) (RegisterGenTraces apCfg tc destPath mSpec)
   recvMsg (clientTransport client) >>= \case
     Left err                               -> pure (Left (T.pack err))
     Right (GenTracesDone _)                -> pure (Right ())

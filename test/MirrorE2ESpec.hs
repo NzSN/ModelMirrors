@@ -1,7 +1,7 @@
 module MirrorE2ESpec (spec) where
 
 import Apalache.Command (generateTraceFiles)
-import Apalache.Rpc.Types (ApalacheSpec, mkSpecFromFile)
+import Apalache.Rpc.Types (ApalacheSpec (..), mkSpecFromFile)
 import Apalache.Types
   ( ApalacheConfig (..)
   , TraceGenerationConfig (..)
@@ -14,13 +14,16 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Protocol.Client
-  ( exploreSession
+  ( cannedClient
+  , exploreSession
   , fixedClient
   , hourClockClient
   , runClient
   , runClientExplore
   , runClientGenTraces
+  , runClientWithSpec
   , runClientWithTraces
   )
 import Protocol.Core (ClientMessage (..), MirrorMessage (..))
@@ -54,6 +57,7 @@ spec = testGroup "MirrorE2ESpec"
   , testExploreHappyPath
   , testExploreMismatch
   , testExploreSessionHappyPath
+  , testRegisterInlineSpec
   ]
 
 hcApalacheCfg :: ApalacheConfig
@@ -135,7 +139,7 @@ testRegisterHappyPath = testCase "e2e Register: hourClockClient passes verificat
   assertBool "mirror produced steps" (not (null steps))
   assertBool "starts with MirrorRecvRegister"
     (case steps of
-      (MirrorRecvRegister _ _ : _) -> True
+      (MirrorRecvRegister _ _ _ : _) -> True
       _ -> False)
   assertBool "spec validated"
     (hasStep (\case MirrorSendSpecValidatedValid -> True; _ -> False) steps)
@@ -231,7 +235,7 @@ testRegisterGenTraces = testCase "e2e RegisterGenTraces: mirror generates and no
   steps <- readMVar mv
   assertBool "starts with MirrorRecvRegisterGenTraces"
     (case steps of
-      (MirrorRecvRegisterGenTraces _ _ _ : _) -> True
+      (MirrorRecvRegisterGenTraces _ _ _ _ : _) -> True
       _ -> False)
   case [ps | MirrorSendGenTracesDone ps <- steps] of
     [ps] -> do
@@ -243,6 +247,67 @@ testRegisterGenTraces = testCase "e2e RegisterGenTraces: mirror generates and no
 
 hcSpec :: IO ApalacheSpec
 hcSpec = mkSpecFromFile "test/specs/HourClock.tla"
+
+-- | E2E, Register flow with INLINE spec sources (network-separation feature):
+-- the mirror must not touch the filesystem path in the config.
+--
+-- The client sends @Register@ whose @spec@ field carries BOTH modules of a
+-- two-module spec (ExtMain EXTENDS ExtDep), while @specPath@ deliberately
+-- points at a path that does not exist on the mirror's filesystem. The mirror
+-- must materialize the sources to a temp dir (files named after their MODULE
+-- headers, so the apalache CLI can resolve EXTENDS there) and run from the
+-- materialized root instead of specPath.
+--
+-- Source order matters: apalache treats sources[0] as the root module and the
+-- rest as dependencies, so ExtMain comes first.
+--
+-- Expected outcome: client returns @Right ()@; the step log starts with
+-- 'MirrorRecvRegister' carrying @Just spec@, ends with
+-- 'MirrorSendAllStepsDone', and is otherwise clean. Success proves the bogus
+-- specPath was never read.
+testRegisterInlineSpec :: TestTree
+testRegisterInlineSpec = testCase "e2e Register: inline spec sources bypass specPath" $ do
+  rootSrc <- TIO.readFile "test/specs/ExtMain.tla"
+  depSrc <- TIO.readFile "test/specs/ExtDep.tla"
+  let inlineSpec = ApalacheSpec [rootSrc, depSrc]
+      cfg = ApalacheConfig
+        { specPath      = "/nonexistent/ExtMain.tla"
+        , initPredicate = Nothing
+        , nextPredicate = Nothing
+        , constInit     = Nothing
+        , invariant     = T.pack "TraceComplete"
+        , lengthBound   = 3
+        , paramVarNames = T.empty
+        }
+      tc = TraceGenerationConfig 1 Nothing
+      -- apalache writes both violation.itf.json and violation1.itf.json
+      -- (same trace twice), and the mirror replays every *.itf.json found —
+      -- so one logical trace is replayed twice. Pre-existing behavior,
+      -- also relied on by MainSpec. Serve states for both replays.
+      states = concat $ replicate 2
+        [ Map.fromList
+            [ (T.pack "count", VInt n)
+            , (T.pack "action_taken", VStr (if n == 0 then T.pack "init" else T.pack "tick"))
+            ]
+        | n <- [0 .. 3]
+        ]
+  (clientEnd, mirrorEnd) <- newMockTransport
+  mv <- forkMirror mirrorEnd
+  client <- cannedClient clientEnd states
+  result <- runClientWithSpec client cfg tc (Just inlineSpec)
+  case result of
+    Left err -> assertFailure ("client failed: " ++ T.unpack err)
+    Right () -> pure ()
+  steps <- readMVar mv
+  assertBool "starts with MirrorRecvRegister carrying inline spec"
+    (case steps of
+      (MirrorRecvRegister _ _ (Just _) : _) -> True
+      _ -> False)
+  assertBool "ends with MirrorSendAllStepsDone"
+    (case reverse steps of
+      (MirrorSendAllStepsDone : _) -> True
+      _ -> False)
+  assertCleanSteps steps
 
 -- | E2E, RegisterExplore flow, happy path (MirrorProtocol.tla:
 -- ClientRegisterExplore -> MirrorRecvRegisterExplore -> validating -> ready,

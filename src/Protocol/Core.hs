@@ -10,9 +10,9 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 
 data ClientMessage
-  = Register !ApalacheConfig !TraceGenerationConfig
+  = Register !ApalacheConfig !TraceGenerationConfig !(Maybe ApalacheSpec)
   | RegisterTraces !ApalacheConfig ![FilePath]
-  | RegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath)
+  | RegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath) !(Maybe ApalacheSpec)
   | RegisterExplore !ApalacheSpec ![Text] ![Text] !Int
   | RegisterExploreSession !ApalacheSpec ![Text] ![Text]
   | ExploreAssumeTransition !Int

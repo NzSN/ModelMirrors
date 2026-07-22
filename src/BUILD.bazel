@@ -15,6 +15,7 @@ haskell_library(
         "@stackage//:filepath",
         "@stackage//:http-client",
         "@stackage//:http-types",
+        "@stackage//:network",
         "@stackage//:process",
         "@stackage//:text",
     ],

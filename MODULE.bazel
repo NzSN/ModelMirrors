@@ -73,6 +73,7 @@ stack_snapshot.package(name = "directory")
 stack_snapshot.package(name = "filepath")
 stack_snapshot.package(name = "http-client")
 stack_snapshot.package(name = "http-types")
+stack_snapshot.package(name = "network")
 stack_snapshot.package(name = "process")
 stack_snapshot.package(name = "text")
 

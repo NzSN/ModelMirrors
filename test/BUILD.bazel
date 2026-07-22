@@ -22,6 +22,7 @@ haskell_test(
         "@stackage//:containers",
         "@stackage//:directory",
         "@stackage//:filepath",
+        "@stackage//:network",
         "@stackage//:process",
         "@stackage//:tasty",
         "@stackage//:tasty-hunit",

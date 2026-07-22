@@ -13,8 +13,10 @@ module Protocol.Mirror
   , MkReplayOne (..)
   , replaySteps
   , runMirror
+  , runMirrorWithSpec
   , runMirrorWithTraces
   , runMirrorGenTraces
+  , runMirrorGenTracesWithSpec
   , runMirrorExplore
   , runMirrorExploreSession
   , run
@@ -33,6 +35,7 @@ import Apalache.Explorer
   , withApalacheServer
   )
 import Apalache.Rpc.Client (assumeTransition, nextStep, rollback)
+import Apalache.SpecSource (materializeSpec, removeSpecDir)
 import Apalache.Rpc.Types
   ( ApalacheSpec
   , AssumeTransitionParams (..)
@@ -57,6 +60,7 @@ import Apalache.Types
     , Value (..)
     , applyParamVars
     )
+import Control.Exception (bracket)
 import Control.Monad (forM_)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -74,9 +78,9 @@ import System.Directory (createDirectoryIfMissing, copyFile, doesDirectoryExist)
 import System.FilePath (takeFileName, (</>))
 
 data MirrorStep
-  = MirrorRecvRegister !ApalacheConfig !TraceGenerationConfig
+  = MirrorRecvRegister !ApalacheConfig !TraceGenerationConfig !(Maybe ApalacheSpec)
   | MirrorRecvRegisterTraces !ApalacheConfig ![FilePath]
-  | MirrorRecvRegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath)
+  | MirrorRecvRegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath) !(Maybe ApalacheSpec)
   | MirrorRecvRegisterExplore !ApalacheSpec ![Text] ![Text] !Int
   | MirrorRecvRegisterExploreSession !ApalacheSpec ![Text] ![Text]
   | MirrorRecvExploreCmd !Text
@@ -129,9 +133,9 @@ normalizeMirrorSteps = go
     go (step : rest) = mirrorStepActionName step : go rest
 
 data RecvMsg t = RecvMsg t
-data MkRunMirror t = MkRunMirror t ApalacheConfig TraceGenerationConfig
+data MkRunMirror t = MkRunMirror t ApalacheConfig TraceGenerationConfig (Maybe ApalacheSpec)
 data MkRunMirrorWithTraces t = MkRunMirrorWithTraces t ApalacheConfig [FilePath]
-data MkRunMirrorGenTraces t = MkRunMirrorGenTraces t ApalacheConfig TraceGenerationConfig (Maybe FilePath)
+data MkRunMirrorGenTraces t = MkRunMirrorGenTraces t ApalacheConfig TraceGenerationConfig (Maybe FilePath) (Maybe ApalacheSpec)
 data MkExploreMirror t = MkExploreMirror t ApalacheSpec [Text] [Text] Int
 data MkExploreSession t = MkExploreSession t ApalacheSpec [Text] [Text]
 data MkReplayAll t = MkReplayAll t (StateDriver IO) [ItfTrace]
@@ -144,15 +148,15 @@ instance Transport t => Step (RecvMsg t) where
   exec (RecvMsg transport) = do
     msg <- recvMsg transport
     case msg of
-      Right (Register apCfg tc) -> do
-        steps <- exec (MkRunMirror transport apCfg tc)
-        pure (MirrorRecvRegister apCfg tc : steps)
+      Right (Register apCfg tc mSpec) -> do
+        steps <- exec (MkRunMirror transport apCfg tc mSpec)
+        pure (MirrorRecvRegister apCfg tc mSpec : steps)
       Right (RegisterTraces apCfg traces) -> do
         steps <- exec (MkRunMirrorWithTraces transport apCfg traces)
         pure (MirrorRecvRegisterTraces apCfg traces : steps)
-      Right (RegisterGenTraces apCfg tc destPath) -> do
-        steps <- exec (MkRunMirrorGenTraces transport apCfg tc destPath)
-        pure (MirrorRecvRegisterGenTraces apCfg tc destPath : steps)
+      Right (RegisterGenTraces apCfg tc destPath mSpec) -> do
+        steps <- exec (MkRunMirrorGenTraces transport apCfg tc destPath mSpec)
+        pure (MirrorRecvRegisterGenTraces apCfg tc destPath mSpec : steps)
       Right (RegisterExplore spec invs exports maxSteps) -> do
         steps <- exec (MkExploreMirror transport spec invs exports maxSteps)
         pure (MirrorRecvRegisterExplore spec invs exports maxSteps : steps)
@@ -166,22 +170,38 @@ instance Transport t => Step (RecvMsg t) where
         sendMsg transport (ProtocolError (T.pack err))
         pure [MirrorSendProtocolError (T.pack err)]
 
+-- | When inline spec sources are provided, materialize them to a temp dir
+-- (the apalache CLI resolves EXTENDS from the filesystem) and override the
+-- config's specPath; otherwise use the config as-is.
+withSpecDir :: Transport t => t -> Maybe ApalacheSpec -> ApalacheConfig -> (ApalacheConfig -> IO [MirrorStep]) -> IO [MirrorStep]
+withSpecDir _ Nothing cfg k = k cfg
+withSpecDir transport (Just spec) cfg k = do
+  r <- materializeSpec spec
+  case r of
+    Left err -> do
+      sendMsg transport (RegisterError err)
+      pure [MirrorSendRegisterError err]
+    Right (dir, rootPath) ->
+      bracket (pure dir) removeSpecDir
+        (\_ -> k cfg { specPath = rootPath })
+
 instance Transport t => Step (MkRunMirror t) where
-  exec (MkRunMirror transport cfg tc) = do
-    traceRes <- generateTraces cfg tc
-    case traceRes of
-      Left err -> do
-        sendMsg transport (RegisterError (unApalacheError err))
-        pure [MirrorSendRegisterError (unApalacheError err)]
-      Right (TracesGenerated traces) -> do
-        sendMsg transport (SpecValidated SpecValid)
-        let driver = makeTransportDriver transport
-        stepResults <- exec (MkReplayAll transport driver traces)
-        sendMsg transport AllStepsDone
-        pure (MirrorSendSpecValidatedValid : stepResults ++ [MirrorSendAllStepsDone])
-      Right (GenerationError e) -> do
-        sendMsg transport (ProtocolError e)
-        pure [MirrorSendProtocolError e]
+  exec (MkRunMirror transport cfg tc mSpec) =
+    withSpecDir transport mSpec cfg $ \cfg' -> do
+      traceRes <- generateTraces cfg' tc
+      case traceRes of
+        Left err -> do
+          sendMsg transport (RegisterError (unApalacheError err))
+          pure [MirrorSendRegisterError (unApalacheError err)]
+        Right (TracesGenerated traces) -> do
+          sendMsg transport (SpecValidated SpecValid)
+          let driver = makeTransportDriver transport
+          stepResults <- exec (MkReplayAll transport driver traces)
+          sendMsg transport AllStepsDone
+          pure (MirrorSendSpecValidatedValid : stepResults ++ [MirrorSendAllStepsDone])
+        Right (GenerationError e) -> do
+          sendMsg transport (ProtocolError e)
+          pure [MirrorSendProtocolError e]
 
 instance Transport t => Step (MkRunMirrorWithTraces t) where
   exec (MkRunMirrorWithTraces transport cfg tracePaths) = do
@@ -205,21 +225,22 @@ instance Transport t => Step (MkRunMirrorWithTraces t) where
         if isDir then findTraceFiles p else pure [p]
 
 instance Transport t => Step (MkRunMirrorGenTraces t) where
-  exec (MkRunMirrorGenTraces transport cfg tc destPath) = do
-    result <- generateTraceFiles cfg tc
-    case result of
-      Left err -> do
-        sendMsg transport (RegisterError (unApalacheError err))
-        pure [MirrorSendRegisterError (unApalacheError err)]
-      Right (outDir, paths) -> do
-        finalPaths <- case destPath of
-          Just d | d /= outDir -> do
-            createDirectoryIfMissing True d
-            forM_ paths $ \p -> copyFile p (d </> takeFileName p)
-            pure $ map (\p -> d </> takeFileName p) paths
-          _ -> pure paths
-        sendMsg transport (GenTracesDone finalPaths)
-        pure [MirrorSendGenTracesDone finalPaths]
+  exec (MkRunMirrorGenTraces transport cfg tc destPath mSpec) =
+    withSpecDir transport mSpec cfg $ \cfg' -> do
+      result <- generateTraceFiles cfg' tc
+      case result of
+        Left err -> do
+          sendMsg transport (RegisterError (unApalacheError err))
+          pure [MirrorSendRegisterError (unApalacheError err)]
+        Right (outDir, paths) -> do
+          finalPaths <- case destPath of
+            Just d | d /= outDir -> do
+              createDirectoryIfMissing True d
+              forM_ paths $ \p -> copyFile p (d </> takeFileName p)
+              pure $ map (\p -> d </> takeFileName p) paths
+            _ -> pure paths
+          sendMsg transport (GenTracesDone finalPaths)
+          pure [MirrorSendGenTracesDone finalPaths]
 
 instance Transport t => Step (MkExploreMirror t) where
   exec (MkExploreMirror transport spec invs exports maxSteps) =
@@ -448,13 +469,20 @@ replaySteps :: Transport t => t -> StateDriver IO -> ItfTrace -> IO [MirrorStep]
 replaySteps transport driver = exec . MkReplayOne transport driver
 
 runMirror :: Transport t => t -> ApalacheConfig -> TraceGenerationConfig -> IO [MirrorStep]
-runMirror transport cfg tc = exec (MkRunMirror transport cfg tc)
+runMirror transport cfg tc = exec (MkRunMirror transport cfg tc Nothing)
+
+runMirrorWithSpec :: Transport t => t -> ApalacheConfig -> TraceGenerationConfig -> ApalacheSpec -> IO [MirrorStep]
+runMirrorWithSpec transport cfg tc spec = exec (MkRunMirror transport cfg tc (Just spec))
 
 runMirrorWithTraces :: Transport t => t -> ApalacheConfig -> [FilePath] -> IO [MirrorStep]
 runMirrorWithTraces transport cfg traces = exec (MkRunMirrorWithTraces transport cfg traces)
 
 runMirrorGenTraces :: Transport t => t -> ApalacheConfig -> TraceGenerationConfig -> Maybe FilePath -> IO [MirrorStep]
-runMirrorGenTraces transport cfg tc destPath = exec (MkRunMirrorGenTraces transport cfg tc destPath)
+runMirrorGenTraces transport cfg tc destPath = exec (MkRunMirrorGenTraces transport cfg tc destPath Nothing)
+
+runMirrorGenTracesWithSpec :: Transport t => t -> ApalacheConfig -> TraceGenerationConfig -> Maybe FilePath -> ApalacheSpec -> IO [MirrorStep]
+runMirrorGenTracesWithSpec transport cfg tc destPath spec =
+  exec (MkRunMirrorGenTraces transport cfg tc destPath (Just spec))
 
 runMirrorExplore :: Transport t => t -> ApalacheSpec -> [Text] -> [Text] -> Int -> IO [MirrorStep]
 runMirrorExplore transport spec invs exports maxSteps =

@@ -11,21 +11,23 @@ import Data.Aeson.Key (fromString)
 import qualified Data.Text as T
 
 instance ToJSON ClientMessage where
-  toJSON (Register apCfg tc) = object
+  toJSON (Register apCfg tc mSpec) = object
     [ fromString "proto_step" .= T.pack "register"
     , fromString "apalacheConfig" .= apCfg
     , fromString "traceConfig" .= tc
+    , fromString "spec" .= mSpec
     ]
   toJSON (RegisterTraces apCfg traces) = object
     [ fromString "proto_step" .= T.pack "register_traces"
     , fromString "apalacheConfig" .= apCfg
     , fromString "itfTracePaths" .= traces
     ]
-  toJSON (RegisterGenTraces apCfg tc dest) = object
+  toJSON (RegisterGenTraces apCfg tc dest mSpec) = object
     [ fromString "proto_step" .= T.pack "register_trace_gen"
     , fromString "apalacheConfig" .= apCfg
     , fromString "traceConfig" .= tc
     , fromString "destPath" .= dest
+    , fromString "spec" .= mSpec
     ]
   toJSON (RegisterExplore spec invs exports maxSteps) = object
     [ fromString "proto_step" .= T.pack "register_explore"
@@ -76,12 +78,14 @@ instance FromJSON ClientMessage where
     case tag of
       t | t == T.pack "register" ->
           Register <$> o .: fromString "apalacheConfig" <*> o .: fromString "traceConfig"
+                   <*> o .:? fromString "spec"
       t | t == T.pack "register_traces" ->
           RegisterTraces <$> o .: fromString "apalacheConfig" <*> o .: fromString "itfTracePaths"
       t | t == T.pack "register_trace_gen" ->
           RegisterGenTraces <$> o .: fromString "apalacheConfig"
                             <*> o .: fromString "traceConfig"
                             <*> o .:? fromString "destPath" .!= Nothing
+                            <*> o .:? fromString "spec"
       t | t == T.pack "register_explore" ->
           RegisterExplore <$> o .: fromString "spec"
                           <*> o .: fromString "invariants"

@@ -440,13 +440,13 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
       let at = actionTake st
       result <- case at of
         "ClientRegister" -> do
-          sendMsg clientEnd (Register apCfg tc)
+          sendMsg clientEnd (Register apCfg tc Nothing)
           pure (i, ("send Register", True, "ok"))
         "ClientRegisterTraces" -> do
           sendMsg clientEnd (RegisterTraces apCfg tracePaths)
           pure (i, ("send RegisterTraces", True, "ok"))
         "ClientRegisterGenTraces" -> do
-          sendMsg clientEnd (RegisterGenTraces apCfg tc Nothing)
+          sendMsg clientEnd (RegisterGenTraces apCfg tc Nothing Nothing)
           pure (i, ("send RegisterGenTraces", True, "ok"))
         "ClientRegisterExplore" -> do
           -- Explore traces are covered by ExploreMirrorSpec; at the message

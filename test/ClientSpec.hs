@@ -62,7 +62,7 @@ testCorrectClientSucceeds = testCase "correct client succeeds" $ do
   client <- cannedClient cEnd [x0, x1]
   mv <- forkClient client apCfg config
   recvMsg mEnd >>= \case
-    Right (Register _ _) -> pure ()
+    Right (Register _ _ _) -> pure ()
     other -> assertFailure $ "expected Register, got " ++ show other
   sendMsg mEnd (SpecValidated SpecValid)
   sendMsg mEnd (InitialState (T.pack "Init") Map.empty)
@@ -188,7 +188,7 @@ testHourClock = testCase "hourClockClient passes verification" $ do
       mv <- forkClient client hcApalacheConfig hcTraceConfig
 
       recvMsg mEnd >>= \case
-        Right (Register _ _) -> pure ()
+        Right (Register _ _ _) -> pure ()
         other -> assertFailure $ "expected Register, got " ++ show other
 
       sendMsg mEnd (SpecValidated SpecValid)

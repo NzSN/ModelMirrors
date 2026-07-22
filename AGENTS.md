@@ -31,11 +31,12 @@ There is no lint, format, or CI config. Both builds use `-Wall` (set in cabal `c
 ## Package Structure (single package)
 
 - Package name: **`ModelMirrors`**
-- Library (16 exposed modules across 4 namespaces):
+- Library (18 exposed modules across 4 namespaces):
   - `Apalache.{Core,Command,Trace,Types}` — apalache-mc wrapper (types, command runner, trace parsing)
+  - `Apalache.SpecSource` — materializes inline spec sources (`{sources: [root, ...deps]}`) to a temp dir for the CLI flows (files named after MODULE headers so EXTENDS resolves)
   - `Engine`, `Engine.{Core,Interactive,Replay,Types}` — trace replay engine and step diffing
-  - `Protocol.{Core,Client,Mirror}`, `Protocol.Format.Json`, `Protocol.Transport.{Core,Mock,Stdio}` — IPC protocol layer
-- Executable: `app/Main.hs` — stdio mirror (currently a stub: just calls `run StdioTransport`)
+  - `Protocol.{Core,Client,Mirror}`, `Protocol.Format.Json`, `Protocol.Transport.{Core,Mock,Stdio,Tcp}` — IPC protocol layer
+- Executable: `app/Main.hs` — default: stdio mirror (`run StdioTransport`); `--serve <port>`: TCP daemon, one protocol session per connection, sequential accept loop (client drops are logged and survived)
 - Tests: `test/Main.hs` — uses `tasty` + `tasty-hunit` test framework
 - Test spec: `test/specs/HourClock.tla` (real TLA+ spec used by integration tests)
 
