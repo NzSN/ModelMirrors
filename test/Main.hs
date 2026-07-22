@@ -9,6 +9,7 @@ import qualified EngineSpec
 import qualified ExploreMirrorSpec
 import qualified MainSpec
 import qualified MinimalTraceCheckSpec
+import qualified MirrorE2ESpec
 import qualified MirrorProtocolSpec
 import qualified MirrorStepSpec
 import Test.Tasty (defaultMain, testGroup)
@@ -24,6 +25,7 @@ main = defaultMain $ testGroup "ModelMirrors"
   , MirrorProtocolSpec.spec
   , MirrorStepSpec.spec
   , MinimalTraceCheckSpec.spec
+  , MirrorE2ESpec.spec
   , ServerBehaviorSpec.spec
   , ExploreMirrorSpec.spec
   ]

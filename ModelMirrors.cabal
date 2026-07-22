@@ -155,6 +155,7 @@ test-suite ModelMirrors-test
         ExploreMirrorSpec,
         MainSpec,
         MinimalTraceCheckSpec,
+        MirrorE2ESpec,
         MirrorProtocolSpec,
         MirrorStepSpec
 
