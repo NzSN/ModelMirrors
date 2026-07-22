@@ -27,8 +27,11 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import System.IO (stderr)
 import System.Process
-  ( createProcess
+  ( CreateProcess (..)
+  , StdStream (..)
+  , createProcess
   , proc
   , terminateProcess
   , waitForProcess
@@ -53,7 +56,9 @@ startApalacheServer mPort = do
         , "--port=" ++ show port
         , "--server-type=explorer"
         ]
-  (_, _, _, ph) <- createProcess (proc bin args)
+  -- Server logs must not go to our stdout: the stdio transport carries
+  -- JSON-lines protocol messages there. Redirect server logs to stderr.
+  (_, _, _, ph) <- createProcess (proc bin args) { std_out = UseHandle stderr }
   client <- newRpcClient port
   waitForServer client 60
   pure $ ApalacheServer port ph
