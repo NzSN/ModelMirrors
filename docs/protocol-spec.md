@@ -4,9 +4,88 @@ This document defines the protocol for communicating with a ModelMirrors mirror 
 
 ## Transport
 
-The mirror process communicates over **stdio** (stdin/stdout). Messages are **newline-delimited JSON**: one JSON object per line, encoded as UTF-8.
+The mirror process communicates over **stdio** (stdin/stdout) by default, or over **TCP** (`--serve <port>`) or **mutually-authenticated TLS 1.3 over TCP** (`--server <port> --tls ...`). Messages are **newline-delimited JSON**: one JSON object per line, encoded as UTF-8. The message format is identical on all transports; TLS affects only connection establishment (mutual certificate authentication), never the session protocol.
 
-Future transports (e.g. socket) may be added but the message format remains the same.
+## Discovery and mTLS (Client Guide)
+
+This section is the complete procedure for a client **in any language** to locate a mirror via the service registry and connect to it securely. It assumes the server was started as:
+
+```
+ModelMirrors --server <port> --tls --cert <server.crt> --key <server.key> \
+    --ca <ca.crt> --registry <registry-url>
+```
+
+You need, provisioned out-of-band: the CA certificate (`ca.crt`) and a client certificate + private key signed by that CA (see `scripts/gen-certs.sh`).
+
+### Step 1 — Discover
+
+Query the Consul-compatible registry over plain HTTP:
+
+```
+GET <registry-url>/v1/health/service/modelmirrors?passing=true
+```
+
+The response is a JSON array; only the `Service` object of each entry matters:
+
+```json
+[
+  {
+    "Service": {
+      "ID": "modelmirrors-host1-8999",
+      "Address": "10.0.0.5",
+      "Port": 8999,
+      "Meta": { "cert-sha256": "<64 lowercase hex chars>" }
+    }
+  }
+]
+```
+
+Rules:
+
+- Only entries returned with `passing=true` are healthy; do not filter further.
+- Skip entries with an empty or missing `Address`, or a missing/zero `Port`.
+- `Meta["cert-sha256"]` may be absent; treat it as optional (step 3 becomes a no-op).
+- Any registry error (unreachable, non-200, malformed JSON) means "no servers" — fail closed or fall back to a directly configured `host:port`.
+
+### Step 2 — TLS handshake
+
+Open a TCP connection to a chosen `Address:Port` and perform a TLS handshake with:
+
+- **TLS 1.3 only** — the server accepts no other version.
+- **Server authentication**: verify the server certificate chain against the pinned `ca.crt`, and verify the hostname/IP in the certificate SAN (standard library behavior when a CA store and server name are supplied).
+- **Client authentication**: present your client certificate and key when the server requests them (it always does). A server signed by a *different* CA, or a missing client certificate, fails the handshake — retry with the next registry entry.
+
+### Step 3 — Fingerprint pinning (defense in depth)
+
+If the registry entry contained `Meta["cert-sha256"]`:
+
+1. Take the peer's **leaf certificate** (the first certificate in the chain presented by the server), in its raw **DER** encoding.
+2. Compute **SHA-256** over the DER bytes, rendered as **lowercase hex** (64 characters).
+3. Compare with the registry value. On mismatch, close the connection and try the next entry.
+
+This step is defense in depth: the mTLS handshake in step 2 already authenticates the server, so a forged registry entry cannot cause impersonation — at worst it causes failed connections.
+
+### Step 4 — Session
+
+Speak the session protocol exactly as on stdio/TCP: newline-delimited JSON, and the **first message must be a `Register*` message** (`register`, `register_traces`, `register_trace_gen`, `register_explore`, or `register_explore_session`). Any other first message receives a `protocol_error` and the connection is closed. There is no greeting, banner, or version exchange — the registry and the TLS handshake carry all setup information.
+
+### Pseudocode
+
+```
+entries = http_get(registry + "/v1/health/service/modelmirrors?passing=true")
+for entry in entries:
+    svc = entry.Service
+    if !svc.Address or !svc.Port: continue
+    try:
+        conn = tls13_connect(svc.Address, svc.Port,
+                             ca=ca_crt, cert=client_crt, key=client_key)
+        if svc.Meta["cert-sha256"]:
+            assert sha256_hex(peer_leaf_cert_der(conn)) == svc.Meta["cert-sha256"]
+        return conn            # ready for step 4
+    catch:
+        continue               # try next entry
+fail "no usable mirror"
+```
 
 ## Message Envelope
 

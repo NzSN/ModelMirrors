@@ -22,24 +22,26 @@ oracle works three ways:
    targeted, scriptable symbolic checking.
 
 The mirror runs as a standalone process. Clients speak newline-delimited JSON
-over **stdio or TCP** — any language can implement a client (a TypeScript one
-lives at [MirrorECMA](https://github.com/NzSN/MirrorECMA)). Spec sources —
-including their `EXTENDS` dependency closure — can travel **inline** in the
-registration messages, so a remote mirror needs no filesystem access to client
-files.
+over **stdio, TCP, or mutually-authenticated TLS 1.3** — any language can
+implement a client (a TypeScript one lives at
+[MirrorECMA](https://github.com/NzSN/MirrorECMA)). Optional **service
+discovery** registers mTLS servers in a Consul-compatible registry. Spec
+sources — including their `EXTENDS` dependency closure — can travel **inline**
+in the registration messages, so a remote mirror needs no filesystem access to
+client files.
 
 ```
-+----------------+     JSON-lines (stdio | TCP)    +-----------------+
-| Client         | <-----------------------------> | Mirror          |
-| (your impl)    |                                 | (ModelMirrors)  |
-+----------------+                                 +-----------------+
-                                                  /        \
-                                          CLI (traces)    JSON-RPC (explorer)
-                                                /              \
-                                          +---------+    +-----------+
-                                          | apalache|    | apalache  |
-                                          | check   |    | server    |
-                                          +---------+    +-----------+
++----------------+   JSON-lines (stdio | TCP | mTLS)  +-----------------+
+| Client         | <--------------------------------> | Mirror          |
+| (your impl)    |                                    | (ModelMirrors)  |
++----------------+                                    +-----------------+
+        ^                                             /        \
+        | discover (Consul registry,           CLI (traces)    JSON-RPC (explorer)
+        |  optional, mTLS mode only)                /              \
++----------------+                            +---------+    +-----------+
+| Registry       |                            | apalache|    | apalache  |
+| (optional)     |                            | check   |    | server    |
++----------------+                            +---------+    +-----------+
 ```
 
 ## Registration flows
@@ -111,12 +113,18 @@ command but the **session stays open**.
 cabal build all        # or: bazel build //...
 ```
 
+Note: the mTLS server mode (`tls`/`crypton` dependencies) builds with cabal
+only; the Bazel build covers the rest of the package (see `AGENTS.md`).
+
 ### Run the mirror
 
 ```sh
 cabal run ModelMirrors                 # stdio mirror (one session)
 cabal run ModelMirrors -- --serve 8823 # TCP daemon: one session per
                                        # connection, sequential accept loop
+# mTLS daemon (see "Secure server mode" below):
+ModelMirrors --server 8823 --tls --cert certs/server.crt \
+    --key certs/server.key --ca certs/ca.crt
 ```
 
 Example: pipe a `register` message to the stdio mirror:
@@ -132,7 +140,8 @@ cabal test all                       # or: bazel test //test:ModelMirrors-test
 ```
 
 Tests include integration tests that invoke `apalache-mc` (CLI and explorer
-server). Expect seconds to minutes of runtime.
+server). Expect seconds to minutes of runtime. The TLS transport specs also
+shell out to `openssl` to generate throwaway certificates.
 
 ## Protocol
 
@@ -213,12 +222,55 @@ order matters: **`sources[0]` is the root module**, the rest are dependencies.
 |---|---|---|
 | stdio | run with no args | One session, then exit |
 | TCP | `--serve <port>` | Daemon: one session per connection, sequential accept loop; a dropped client is logged to stderr and the loop continues. Plain TCP, no TLS |
+| mTLS server | `--server <port> --tls --cert <crt> --key <key> --ca <ca> [--registry <url>]` | TLS 1.3 with mutual authentication: the server requires a client certificate signed by the given CA. Optional service registration (see below) |
+
+## Secure server mode (mTLS)
+
+Generate a private CA plus server/client credentials:
+
+```sh
+scripts/gen-certs.sh certs 127.0.0.1 30
+```
+
+Start the server (the key file must be mode `0600`; the server refuses to start otherwise):
+
+```sh
+ModelMirrors --server 8999 --tls \
+    --cert certs/server.crt --key certs/server.key --ca certs/ca.crt
+```
+
+Clients must present a certificate signed by the same CA; TLS 1.3 is the
+only accepted protocol version. Certificates are short-lived — re-run
+`gen-certs.sh` to renew before expiry. See `docs/server-mode-mtls-design.md`.
+
+### Service discovery (registry)
+
+With `--registry <url>` the server registers itself in a Consul-compatible
+service registry (service name `modelmirrors`) with a 30s TTL check and a
+10s heartbeat, publishing its certificate's SHA-256 fingerprint as metadata:
+
+```sh
+ModelMirrors --server 8999 --tls \
+    --cert certs/server.crt --key certs/server.key --ca certs/ca.crt \
+    --registry http://127.0.0.1:8500
+```
+
+Clients discover healthy servers via `Protocol.Registry.discoverServices`
+and should verify the fingerprint with
+`Protocol.Transport.Tls.connectTlsPinned`. The registry only provides
+location — authentication always happens in the mTLS handshake, so a
+compromised registry cannot impersonate a server. See
+`docs/server-mode-registry-design.md`.
 
 ## Writing a Client
 
 A client in any language must:
 
-1. Spawn the mirror (stdio) or connect to a mirror daemon (TCP).
+1. Spawn the mirror (stdio), connect to a mirror daemon (TCP), or complete a
+   mutually-authenticated TLS 1.3 handshake (mTLS server — client certificate
+   required, signed by the server's CA; optionally locate servers via the
+   registry first). For mTLS + registry, follow the language-agnostic
+   procedure in `docs/protocol-spec.md` ("Discovery and mTLS (Client Guide)").
 2. Send one registration message (`register`, `register_traces`,
    `register_trace_gen`, `register_explore`, or `register_explore_session`).
 3. For stepping flows: wait for `spec_validated`, then answer each
@@ -292,17 +344,19 @@ lockstep.
 
 ```
 ModelMirrors/
-├── app/              Executable entry point (stdio mirror / --serve daemon)
+├── app/              Executable entry point (stdio / --serve / --server --tls)
 ├── src/
 │   ├── Apalache/     Apalache types, command runner, trace parsing,
 │   │                 explorer RPC client, inline-spec materialization
 │   ├── Engine/       Trace replay engine and step diffing
-│   ├── Protocol/     IPC protocol (core types, JSON format, transports)
+│   ├── Protocol/     IPC protocol (core types, JSON format, transports,
+│   │                 registry client)
 │   └── MinimalTraceCheck.hs   Trace normalization and comparison
 ├── test/
 │   ├── Main.hs       Test runner
 │   └── specs/        TLA+ specs used by integration tests
 ├── specs/            Protocol specifications (TLA+)
+├── scripts/          gen-certs.sh (mTLS CA + cert generation)
 ├── docs/             Design documents
 ├── ModelMirrors.cabal
 └── BUILD.bazel
@@ -326,6 +380,8 @@ ModelMirrors/
 | `Protocol.Transport.Core` | `Transport` typeclass |
 | `Protocol.Transport.Stdio` | Stdio implementation of `Transport` |
 | `Protocol.Transport.Tcp` | TCP implementation + `serveTcp` accept loop |
+| `Protocol.Transport.Tls` | TLS 1.3 mutual-auth transport: `serveTls`, `connectTls`, `connectTlsPinned`, cert fingerprints, expiry warnings |
+| `Protocol.Registry` | Consul HTTP API client: service registration, TTL heartbeat, discovery |
 | `Protocol.Client` | Reference client with canned/fixed/hourClock impl |
 | `Protocol.Mirror` | Mirror flows: replay, explore, sessions, `run` |
 | `MinimalTraceCheck` | Normalize and compare MirrorStep sequences |
