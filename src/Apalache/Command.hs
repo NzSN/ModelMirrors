@@ -1,7 +1,9 @@
 module Apalache.Command
   ( validateSpec
   , generateTraces
+  , generateTracesIn
   , generateTraceFiles
+  , generateTraceFilesIn
   , apalacheBin
   ) where
 
@@ -51,9 +53,14 @@ validateSpec cfg bound = do
           pure $ Right $ SpecInvalid (T.pack (cOut ++ cErr))
 
 generateTraces :: ApalacheConfig -> TraceGenerationConfig -> IO (Either ApalacheError TraceGenerationResult)
-generateTraces cfg tc = do
+generateTraces = generateTracesIn Nothing
+
+-- | Like 'generateTraces', but with an explicit @--run-dir@ so
+-- concurrent sessions never share apalache output directories.
+generateTracesIn :: Maybe FilePath -> ApalacheConfig -> TraceGenerationConfig -> IO (Either ApalacheError TraceGenerationResult)
+generateTracesIn runDir cfg tc = do
   bin <- apalacheBin
-  (exit, out, err) <- readProcessWithExitCode bin (traceArgs cfg tc) ""
+  (exit, out, err) <- readProcessWithExitCode bin (traceArgs runDir cfg tc) ""
   case exit of
     ExitFailure 255 ->
       pure $ Left $ ApalacheError (T.pack (out ++ err))
@@ -78,9 +85,14 @@ parseOutputDir = go . lines
       _ -> go ls
 
 generateTraceFiles :: ApalacheConfig -> TraceGenerationConfig -> IO (Either ApalacheError (FilePath, [FilePath]))
-generateTraceFiles cfg tc = do
+generateTraceFiles = generateTraceFilesIn Nothing
+
+-- | Like 'generateTraceFiles', but with an explicit @--run-dir@ so
+-- concurrent sessions never share apalache output directories.
+generateTraceFilesIn :: Maybe FilePath -> ApalacheConfig -> TraceGenerationConfig -> IO (Either ApalacheError (FilePath, [FilePath]))
+generateTraceFilesIn runDir cfg tc = do
   bin <- apalacheBin
-  (exit, out, err) <- readProcessWithExitCode bin (traceArgs cfg tc) ""
+  (exit, out, err) <- readProcessWithExitCode bin (traceArgs runDir cfg tc) ""
   case exit of
     ExitFailure 255 ->
       pure $ Left $ ApalacheError (T.pack (out ++ err))
@@ -107,14 +119,15 @@ checkArgs cfg bound =
     , [specPath cfg]
     ]
 
-traceArgs :: ApalacheConfig -> TraceGenerationConfig -> [String]
-traceArgs cfg tc =
+traceArgs :: Maybe FilePath -> ApalacheConfig -> TraceGenerationConfig -> [String]
+traceArgs runDir cfg tc =
   concat
     [ ["check"]
     , ["--inv=" ++ T.unpack (invariant cfg)]
     , ["--length=" ++ show (lengthBound cfg)]
     , ["--max-error=" ++ show (numTraces tc)]
     , ["--output-traces"]
+    , maybe [] (\d -> ["--run-dir=" ++ d]) runDir
     , optionalArg "--init=" (initPredicate cfg)
     , optionalArg "--next=" (nextPredicate cfg)
     , optionalArg "--cinit=" (constInit cfg)

@@ -3,6 +3,7 @@ module TlsTransportSpec (spec, Certs (..), genCerts, withServer) where
 import Apalache.Command (generateTraceFiles)
 import Apalache.Types (ApalacheConfig (..), TraceGenerationConfig (..))
 import Control.Concurrent (forkIO, killThread, threadDelay)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryPutMVar, tryReadMVar)
 import Control.Exception (SomeException, try)
 import Data.ByteString.Char8 qualified as B8
 import Data.Text qualified as T
@@ -18,7 +19,7 @@ import Network.Socket
   , getSocketName
   , socket
   )
-import Protocol.Client (hourClockClient, runClientWithTraces)
+import Protocol.Client (Client (..), hourClockClient, runClientWithTraces)
 import Protocol.Core (MirrorMessage (..))
 import Protocol.Format.Json ()
 import Protocol.Registry (RegistryUrl (..), ServiceInfo (..), discoverServices)
@@ -32,6 +33,7 @@ import Protocol.Transport.Tls
   , mkServerParams
   , peerCertFingerprintSHA256
   , serveTls
+  , serveTlsConcurrent
   )
 import RegistrySpec (withStubHttp)
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
@@ -47,6 +49,7 @@ spec = testGroup "TlsTransportSpec"
   , testPinnedMismatchRejected
   , testFullSessionOverTls
   , testDiscoverThenPinnedConnect
+  , testConcurrentSessions
   ]
 
 data Certs = Certs
@@ -226,3 +229,50 @@ testDiscoverThenPinnedConnect = testCase "discover via registry, then pinned mTL
             Right (ProtocolError _) -> pure ()
             other -> assertFailure ("expected protocol_error, got " ++ show other)
         other -> assertFailure ("expected one discovered service, got " ++ show other)
+
+-- | Shared multi-client shape: serveTlsConcurrent with 2 jobs runs two
+-- sessions truly concurrently. Session 1 is artificially slowed per
+-- step; session 2 must complete while session 1 is still in flight —
+-- impossible under the sequential accept loop.
+testConcurrentSessions :: TestTree
+testConcurrentSessions = testCase "dispatcher runs two overlapping sessions" $ do
+  genResult <- generateTraceFiles hcApalacheCfg hcTraceConfig
+  tracePaths <- case genResult of
+    Right (_, ps) | not (null ps) -> pure ps
+    Right _ -> assertFailure "no traces generated"
+    Left err -> assertFailure ("pre-generate traces error: " ++ show err)
+  certs <- genCerts
+  port <- freePort
+  serverParams <- mkServerParams (serverCrt certs) (serverKey certs) (caCrt certs)
+  tid <- forkIO (serveTlsConcurrent 2 serverParams port)
+  threadDelay 200000
+  started1 <- newEmptyMVar
+  done1 <- newEmptyMVar
+  done2 <- newEmptyMVar
+  clientParams1 <- mkClientParams "127.0.0.1" (clientCrt certs) (clientKey certs) (caCrt certs)
+  t1 <- connectTls clientParams1 "127.0.0.1" port
+  hc1 <- hourClockClient t1
+  let slowClient = Client t1 $ \a s -> do
+        _ <- tryPutMVar started1 ()
+        threadDelay 500000
+        clientHandler hc1 a s
+  let runSession c = do
+        r <- try (runClientWithTraces c hcApalacheCfg tracePaths) :: IO (Either SomeException (Either T.Text ()))
+        pure (either (Left . show) (either (Left . T.unpack) Right) r)
+  _ <- forkIO (runSession slowClient >>= putMVar done1)
+  takeMVar started1
+  clientParams2 <- mkClientParams "127.0.0.1" (clientCrt certs) (clientKey certs) (caCrt certs)
+  t2 <- connectTls clientParams2 "127.0.0.1" port
+  fastClient <- hourClockClient t2
+  _ <- forkIO (runSession fastClient >>= putMVar done2)
+  r2 <- takeMVar done2
+  stillRunning <- tryReadMVar done1
+  case stillRunning of
+    Nothing -> pure ()
+    Just _ -> assertFailure "session 1 finished before session 2: sessions did not overlap"
+  r1 <- takeMVar done1
+  killThread tid
+  case (r1, r2) of
+    (Right (), Right ()) -> pure ()
+    (Left e, _) -> assertFailure ("session 1 failed: " ++ e)
+    (_, Left e) -> assertFailure ("session 2 failed: " ++ e)

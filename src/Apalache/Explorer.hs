@@ -27,6 +27,17 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import Network.Socket
+  ( AddrInfo (..)
+  , AddrInfoFlag (..)
+  , SockAddr (..)
+  , bind
+  , close
+  , defaultHints
+  , getAddrInfo
+  , getSocketName
+  , socket
+  )
 import System.IO (stderr)
 import System.Process
   ( CreateProcess (..)
@@ -50,7 +61,7 @@ startApalacheServer mPort = do
   bin <- apalacheBin
   port <- case mPort of
     Just p -> pure p
-    Nothing -> pure 8822
+    Nothing -> freePort
   let args =
         [ "server"
         , "--port=" ++ show port
@@ -62,6 +73,22 @@ startApalacheServer mPort = do
   client <- newRpcClient port
   waitForServer client 60
   pure $ ApalacheServer port ph
+
+-- | Pick an ephemeral loopback port by binding port 0 and releasing it.
+-- A concurrent session can claim the port in the gap before apalache
+-- binds it, but the race window is tiny and apalache simply fails to
+-- start (the caller's health check then fails fast).
+freePort :: IO Int
+freePort = do
+  addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) (Just "127.0.0.1") (Just "0")
+  case addrs of
+    [] -> pure 8822
+    (addr : _) -> do
+      s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+      bind s (addrAddress addr)
+      SockAddrInet p _ <- getSocketName s
+      close s
+      pure (fromIntegral p)
 
 stopApalacheServer :: ApalacheServer -> IO ()
 stopApalacheServer server = do

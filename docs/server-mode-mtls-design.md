@@ -106,6 +106,7 @@ No auth messages are added to `Protocol.Core` — the `AuthHello`/`AuthReply`/`A
 
 ## Residual Risks
 
-- **DoS**: TLS handshake is more expensive per connection than plain TCP; the sequential accept loop plus unauthenticated handshake flooding is a real concern. Mitigate with per-IP connection rate limits and handshake timeouts. Full concurrency hardening remains future work.
+- **DoS**: mitigated by the bounded dispatcher (`serveTlsConcurrent`): the TLS handshake runs in the worker thread, so a slow or stalled handshake never blocks the accept loop, and concurrent sessions are capped by `--jobs <n>` (default 4). Excess connections wait in the accept backlog. Per-IP rate limits remain future work.
+- **Session isolation**: concurrent sessions each get a per-session apalache `--run-dir` temp dir (removed on session exit) and an explorer server on an ephemeral port; sessions share no filesystem or port state.
 - **Filesystem access**: mTLS proves identity but does not constrain requests. Add `--root <dir>` to confine `specPath` and trace destinations (separate change).
-- **Cert expiry outages**: mitigated by renewal automation and startup warnings when certs are near expiry (e.g. log a warning at < 7 days remaining).
+- **Cert expiry outages**: mitigated by renewal automation and startup warnings when certs are near expiry (implemented: stderr warning at < 7 days remaining).

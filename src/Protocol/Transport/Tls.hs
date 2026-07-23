@@ -4,12 +4,14 @@ module Protocol.Transport.Tls
   , mkServerParams
   , mkClientParams
   , serveTls
+  , serveTlsConcurrent
   , connectTls
   , connectTlsPinned
   , certFingerprintSHA256
   , peerCertFingerprintSHA256
   ) where
 
+import Control.Concurrent (forkIO, newQSem, signalQSem, waitQSem)
 import Control.Exception (SomeException, bracket, bracketOnError, try)
 import Control.Monad (forever)
 import Data.Bits ((.&.))
@@ -252,6 +254,40 @@ serveTls params port = withSocketsDo $ do
         Left (e :: SomeException) -> hPrint stderr e
         Right _ -> pure ()
       close conn
+  where
+    openListener addr = do
+      s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+      setSocketOption s ReuseAddr 1
+      bind s (addrAddress addr)
+      listen s 5
+      pure s
+
+-- | Like 'serveTls', but dispatches each accepted connection to a worker
+-- thread (bounded to @jobs@ concurrent sessions). The TLS handshake
+-- happens in the worker, so a slow or stalled handshake never blocks the
+-- accept loop. Worker failures are logged to stderr and survived.
+serveTlsConcurrent :: Int -> ServerParams -> PortNumber -> IO ()
+serveTlsConcurrent jobs params port = withSocketsDo $ do
+  sem <- newQSem jobs
+  addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) Nothing (Just (show port))
+  case addrs of
+    [] -> error ("serveTlsConcurrent: cannot resolve port " ++ show port)
+    (addr : _) -> bracket (openListener addr) close $ \lsock -> forever $ do
+      (conn, _) <- accept lsock
+      waitQSem sem
+      _ <- forkIO $ do
+        r <- try $ do
+          ctx <- contextNew (socketBackend conn) params
+          handshake ctx
+          t <- tlsTransport ctx
+          _ <- run t
+          pure ()
+        case r of
+          Left (e :: SomeException) -> hPrint stderr e
+          Right _ -> pure ()
+        close conn
+        signalQSem sem
+      pure ()
   where
     openListener addr = do
       s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)

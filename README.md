@@ -222,7 +222,10 @@ order matters: **`sources[0]` is the root module**, the rest are dependencies.
 |---|---|---|
 | stdio | run with no args | One session, then exit |
 | TCP | `--serve <port>` | Daemon: one session per connection, sequential accept loop; a dropped client is logged to stderr and the loop continues. Plain TCP, no TLS |
-| mTLS server | `--server <port> --tls --cert <crt> --key <key> --ca <ca> [--registry <url>]` | TLS 1.3 with mutual authentication: the server requires a client certificate signed by the given CA. Optional service registration (see below) |
+| mTLS server | `--server <port> --tls --cert <crt> --key <key> --ca <ca> [--registry <url>] [--jobs <n>]` | TLS 1.3 with mutual authentication: the server requires a client certificate signed by the given CA. Runs a bounded dispatcher with `n` concurrent sessions (default 4; `--jobs 1` falls back to sequential). Optional service registration (see below) |
+
+Concurrent sessions are isolated: each gets its own apalache `--run-dir`
+and its own explorer server on an ephemeral port.
 
 ## Secure server mode (mTLS)
 
@@ -261,6 +264,65 @@ and should verify the fingerprint with
 location — authentication always happens in the mTLS handshake, so a
 compromised registry cannot impersonate a server. See
 `docs/server-mode-registry-design.md`.
+
+## Process model
+
+The mirror is a **single OS process** that spawns `apalache-mc` child
+processes on demand — each apalache invocation (trace checking or an
+explorer server) is a full JVM subprocess and is the heavyweight resource
+unit. Threading and isolation depend on the mode:
+
+| Mode | Threads | Blocking behavior |
+|---|---|---|
+| stdio | main only | one session, then exit |
+| `--serve` | main only | sequential accept; a slow client blocks later connections |
+| `--server` (`--jobs 1`) | main (+heartbeat) | sequential, plus TLS |
+| `--server` (`--jobs n`, default 4) | main + up to n workers (+heartbeat) | accept loop never blocks: TLS handshake and session run in a worker |
+
+In the concurrent case the accept loop dispatches each connection to a
+worker thread, bounded by a semaphore (`--jobs n`); excess connections wait
+in the kernel backlog until a slot frees. Because the TLS handshake happens
+in the worker, a slow or stalled handshake cannot block new connections.
+
+```
+ModelMirrors process (--server, --jobs 2)
+============================================================
+ main thread
+   |
+   |-- heartbeat thread (registry TTL, --registry only) --> Consul
+   |
+   |-- accept loop -----------------------------------------------
+   |        | accept                        | accept
+   |        v                               v
+   |   worker thread 1                 worker thread 2      (<= jobs,
+   |     TLS 1.3 handshake               TLS 1.3 handshake    QSem-bounded;
+   |     protocol session                protocol session     conn 3+ waits
+   |       |-- spawn ----------------->    |-- spawn -------->  in backlog)
+   |       v                               v
+   |   apalache-mc (JVM)             apalache-mc (JVM)
+   |   --run-dir=/tmp/...-a          --run-dir=/tmp/...-b
+   |   (or explorer server           (or explorer server
+   |    on ephemeral port)            on ephemeral port)
+============================================================
+```
+
+Session isolation:
+
+- **Protocol state** is per-worker (no shared mutable state between sessions).
+- **Trace generation** uses a per-session apalache `--run-dir` temp dir,
+  removed when the session ends — concurrent `register` /
+  `register_trace_gen` sessions never share output directories.
+- **Explorer flows** start a per-session apalache server subprocess on an
+  ephemeral port.
+- **Failures are per-connection**: a TLS failure, client drop, or session
+  error is logged to stderr and closes that connection only; the accept
+  loop and other sessions continue. A listener failure is fatal (process
+  restart is the orchestrator's job).
+- The heartbeat thread (registry mode) swallows all exceptions; a registry
+  outage only removes the server from discovery, never stops serving.
+
+Note that `--jobs n` effectively means "at most n concurrent apalache
+JVMs" — size it for the host's memory, not just CPU.
 
 ## Writing a Client
 

@@ -2,9 +2,11 @@ module Protocol.Transport.Tcp
   ( TcpTransport
   , tcpTransport
   , serveTcp
+  , serveTcpConcurrent
   ) where
 
-import Control.Exception (IOException, bracket, try)
+import Control.Concurrent (forkIO, newQSem, signalQSem, waitQSem)
+import Control.Exception (IOException, SomeException, bracket, try)
 import Control.Monad (forever)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as B8
@@ -63,6 +65,38 @@ serveTcp port = withSocketsDo $ do
         Left (e :: IOException) -> hPrint stderr e
         Right _ -> pure ()
       close conn
+  where
+    openListener addr = do
+      s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+      setSocketOption s ReuseAddr 1
+      bind s (addrAddress addr)
+      listen s 5
+      pure s
+
+-- | Like 'serveTcp', but dispatches each accepted connection to a worker
+-- thread, bounded to at most @jobs@ concurrent sessions (excess
+-- connections wait in the accept backlog until a slot frees). Worker
+-- failures are logged to stderr and never take down the accept loop.
+serveTcpConcurrent :: Int -> PortNumber -> IO ()
+serveTcpConcurrent jobs port = withSocketsDo $ do
+  sem <- newQSem jobs
+  addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) Nothing (Just (show port))
+  case addrs of
+    [] -> error ("serveTcpConcurrent: cannot resolve port " ++ show port)
+    (addr : _) -> bracket (openListener addr) close $ \lsock -> forever $ do
+      (conn, _) <- accept lsock
+      waitQSem sem
+      _ <- forkIO $ do
+        r <- try $ do
+          t <- tcpTransport conn
+          _ <- run t
+          pure ()
+        case r of
+          Left (e :: SomeException) -> hPrint stderr e
+          Right _ -> pure ()
+        close conn
+        signalQSem sem
+      pure ()
   where
     openListener addr = do
       s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)

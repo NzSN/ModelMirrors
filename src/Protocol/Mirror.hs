@@ -22,7 +22,7 @@ module Protocol.Mirror
   , run
   ) where
 
-import Apalache.Command (generateTraceFiles, generateTraces)
+import Apalache.Command (generateTraceFilesIn, generateTracesIn)
 import Apalache.Explorer
   ( Explorer (..)
   , exploreAssumeState
@@ -75,6 +75,7 @@ import Protocol.Core (ClientMessage (..), MirrorMessage (..))
 import Protocol.Format.Json ()
 import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
 import System.Directory (createDirectoryIfMissing, copyFile, doesDirectoryExist)
+import System.IO.Temp (withSystemTempDirectory)
 import System.FilePath (takeFileName, (</>))
 
 data MirrorStep
@@ -185,23 +186,29 @@ withSpecDir transport (Just spec) cfg k = do
       bracket (pure dir) removeSpecDir
         (\_ -> k cfg { specPath = rootPath })
 
+-- | Run an action with a per-session temporary directory (removed on
+-- exit) so concurrent sessions never share apalache run directories.
+withSessionDir :: (FilePath -> IO a) -> IO a
+withSessionDir = withSystemTempDirectory "modelmirrors-session-"
+
 instance Transport t => Step (MkRunMirror t) where
   exec (MkRunMirror transport cfg tc mSpec) =
-    withSpecDir transport mSpec cfg $ \cfg' -> do
-      traceRes <- generateTraces cfg' tc
-      case traceRes of
-        Left err -> do
-          sendMsg transport (RegisterError (unApalacheError err))
-          pure [MirrorSendRegisterError (unApalacheError err)]
-        Right (TracesGenerated traces) -> do
-          sendMsg transport (SpecValidated SpecValid)
-          let driver = makeTransportDriver transport
-          stepResults <- exec (MkReplayAll transport driver traces)
-          sendMsg transport AllStepsDone
-          pure (MirrorSendSpecValidatedValid : stepResults ++ [MirrorSendAllStepsDone])
-        Right (GenerationError e) -> do
-          sendMsg transport (ProtocolError e)
-          pure [MirrorSendProtocolError e]
+    withSpecDir transport mSpec cfg $ \cfg' ->
+      withSessionDir $ \sessionDir -> do
+        traceRes <- generateTracesIn (Just sessionDir) cfg' tc
+        case traceRes of
+          Left err -> do
+            sendMsg transport (RegisterError (unApalacheError err))
+            pure [MirrorSendRegisterError (unApalacheError err)]
+          Right (TracesGenerated traces) -> do
+            sendMsg transport (SpecValidated SpecValid)
+            let driver = makeTransportDriver transport
+            stepResults <- exec (MkReplayAll transport driver traces)
+            sendMsg transport AllStepsDone
+            pure (MirrorSendSpecValidatedValid : stepResults ++ [MirrorSendAllStepsDone])
+          Right (GenerationError e) -> do
+            sendMsg transport (ProtocolError e)
+            pure [MirrorSendProtocolError e]
 
 instance Transport t => Step (MkRunMirrorWithTraces t) where
   exec (MkRunMirrorWithTraces transport cfg tracePaths) = do
@@ -226,21 +233,22 @@ instance Transport t => Step (MkRunMirrorWithTraces t) where
 
 instance Transport t => Step (MkRunMirrorGenTraces t) where
   exec (MkRunMirrorGenTraces transport cfg tc destPath mSpec) =
-    withSpecDir transport mSpec cfg $ \cfg' -> do
-      result <- generateTraceFiles cfg' tc
-      case result of
-        Left err -> do
-          sendMsg transport (RegisterError (unApalacheError err))
-          pure [MirrorSendRegisterError (unApalacheError err)]
-        Right (outDir, paths) -> do
-          finalPaths <- case destPath of
-            Just d | d /= outDir -> do
-              createDirectoryIfMissing True d
-              forM_ paths $ \p -> copyFile p (d </> takeFileName p)
-              pure $ map (\p -> d </> takeFileName p) paths
-            _ -> pure paths
-          sendMsg transport (GenTracesDone finalPaths)
-          pure [MirrorSendGenTracesDone finalPaths]
+    withSpecDir transport mSpec cfg $ \cfg' ->
+      withSessionDir $ \sessionDir -> do
+        result <- generateTraceFilesIn (Just sessionDir) cfg' tc
+        case result of
+          Left err -> do
+            sendMsg transport (RegisterError (unApalacheError err))
+            pure [MirrorSendRegisterError (unApalacheError err)]
+          Right (outDir, paths) -> do
+            finalPaths <- case destPath of
+              Just d | d /= outDir -> do
+                createDirectoryIfMissing True d
+                forM_ paths $ \p -> copyFile p (d </> takeFileName p)
+                pure $ map (\p -> d </> takeFileName p) paths
+              _ -> pure paths
+            sendMsg transport (GenTracesDone finalPaths)
+            pure [MirrorSendGenTracesDone finalPaths]
 
 instance Transport t => Step (MkExploreMirror t) where
   exec (MkExploreMirror transport spec invs exports maxSteps) =
