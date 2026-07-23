@@ -1,5 +1,5 @@
 ---------------- MODULE MirrorProtocol ---------------------
-EXTENDS Integers
+EXTENDS Integers, Sequences, Apalache
 
 \* -----------------------------------------------------------------------------
 \* Protocol phases (mirror side)
@@ -20,7 +20,6 @@ NEXT_STEP          == 5
 STEP_OK            == 6
 STEP_MISMATCH      == 7
 ALL_STEPS_DONE     == 8
-PROTOCOL_ERROR     == 9
 REGISTER_TRACES    == 10
 REGISTER_TRACE_GEN == 11
 GEN_TRACES_DONE    == 12
@@ -193,13 +192,6 @@ ClientRecvAllStepsDone ==
   /\ action_taken' = "ClientRecvAllStepsDone"
   /\ UNCHANGED <<mp, cl_to_mir, mflow>>
 
-ClientRecvProtocolError ==
-  /\ mir_to_cl = PROTOCOL_ERROR
-  /\ cp' = "done"
-  /\ mir_to_cl' = NO_MSG
-  /\ action_taken' = "ClientRecvProtocolError"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow>>
-
 ClientRecvRegisterError ==
   /\ mir_to_cl = REGISTER_ERROR
   /\ cp = "waiting_validation"
@@ -299,19 +291,33 @@ MirrorRecvExploreDone ==
   /\ UNCHANGED <<cp, mflow>>
 
 \* Mirror receives ReportState.
-\* Nondeterministic branches encode: state match or mismatch,
-\* and whether more trace steps remain.
-MirrorRecvReportState ==
+\* Three distinct actions encode: match with more steps, match on the
+\* last step, and mismatch — split so trace projection can tell them apart.
+MirrorRecvReportOk ==
   /\ cl_to_mir = REPORT_STATE
   /\ mp = "stepping"
   /\ cl_to_mir' = NO_MSG
-  /\ action_taken' = "MirrorRecvReportState"
-  /\ \/ /\ mp' = "stepping"            \* match, more steps remain
-        /\ mir_to_cl' = STEP_OK         \* queued; NextStep sent separately
-     \/ /\ mp' = "stepping"            \* match, last step
-        /\ mir_to_cl' = ALL_STEPS_DONE
-     \/ /\ mp' = "done"                \* mismatch
-        /\ mir_to_cl' = STEP_MISMATCH
+  /\ mp' = "stepping"                \* match, more steps remain
+  /\ mir_to_cl' = STEP_OK            \* queued; NextStep sent separately
+  /\ action_taken' = "MirrorRecvReportOk"
+  /\ UNCHANGED <<cp, mflow>>
+
+MirrorRecvReportAllDone ==
+  /\ cl_to_mir = REPORT_STATE
+  /\ mp = "stepping"
+  /\ cl_to_mir' = NO_MSG
+  /\ mp' = "done"                    \* match, last step
+  /\ mir_to_cl' = ALL_STEPS_DONE
+  /\ action_taken' = "MirrorRecvReportAllDone"
+  /\ UNCHANGED <<cp, mflow>>
+
+MirrorRecvReportMismatch ==
+  /\ cl_to_mir = REPORT_STATE
+  /\ mp = "stepping"
+  /\ cl_to_mir' = NO_MSG
+  /\ mp' = "done"                    \* mismatch
+  /\ mir_to_cl' = STEP_MISMATCH
+  /\ action_taken' = "MirrorRecvReportMismatch"
   /\ UNCHANGED <<cp, mflow>>
 
 \* -----------------------------------------------------------------------------
@@ -333,15 +339,6 @@ MirrorSendSpecValidatedValid ==
   /\ mp' = "ready"
   /\ mir_to_cl' = SPEC_VALIDATED
   /\ action_taken' = "MirrorSendSpecValidatedValid"
-  /\ UNCHANGED <<cp, cl_to_mir, mflow>>
-
-MirrorSendSpecValidatedInvalid ==
-  /\ mp = "validating"
-  /\ mflow = "traces"
-  /\ mir_to_cl = NO_MSG
-  /\ mp' = "done"
-  /\ mir_to_cl' = SPEC_VALIDATED
-  /\ action_taken' = "MirrorSendSpecValidatedInvalid"
   /\ UNCHANGED <<cp, cl_to_mir, mflow>>
 
 MirrorSendRegisterError ==
@@ -396,7 +393,15 @@ Init ==
 \* Next
 \* -----------------------------------------------------------------------------
 
+\* Explicit terminal state: both sides finished; halt cleanly.
+Halt ==
+  /\ mp = "done"
+  /\ cp = "done"
+  /\ action_taken' = "Halt"
+  /\ UNCHANGED <<mp, cp, mflow, cl_to_mir, mir_to_cl>>
+
 Next ==
+  \/ Halt
   \/ ClientRegister
   \/ ClientRegisterTraces
   \/ ClientRegisterGenTraces
@@ -412,7 +417,6 @@ Next ==
   \/ ClientRecvStepOk
   \/ ClientRecvStepMismatch
   \/ ClientRecvAllStepsDone
-  \/ ClientRecvProtocolError
   \/ ClientRecvRegisterError
   \/ ClientRecvExplorerReady
   \/ ClientRecvExploreResult
@@ -424,10 +428,11 @@ Next ==
   \/ MirrorRecvRegisterExploreSession
   \/ MirrorRecvExploreCmd
   \/ MirrorRecvExploreDone
-  \/ MirrorRecvReportState
+  \/ MirrorRecvReportOk
+  \/ MirrorRecvReportAllDone
+  \/ MirrorRecvReportMismatch
   \/ MirrorSendGenTracesDone
   \/ MirrorSendSpecValidatedValid
-  \/ MirrorSendSpecValidatedInvalid
   \/ MirrorSendRegisterError
   \/ MirrorSendExplorerReady
   \/ MirrorSendInitialState
@@ -448,12 +453,15 @@ PhaseOk ==
   /\ mp \in Ms
   /\ cp \in Cs
 
-\* The happy path never sends protocol_error.
-NoProtocolError ==
-  mir_to_cl # PROTOCOL_ERROR
+\* The client never waits on a message the mirror will never send:
+\* when the client is mid-session, the mirror is in a phase that can respond.
+ClientNeverStuck ==
+  /\ cp = "waiting_init" => mp \in {"validating", "ready", "stepping"}
+  /\ cp = "waiting_ack"  => mp \in {"stepping", "done"}
+  /\ cp = "waiting_done" => mp \in {"exploring", "done"}
 
 Inv == PhaseOk /\
-       NoProtocolError
+       ClientNeverStuck
 
 \* Force trace generation: Apalache finds counterexamples
 \* showing paths from idle to done.
@@ -474,5 +482,24 @@ TraceStepping ==
 
 \* View that captures protocol-relevant state for trace inspection.
 MirrorView == <<mp, cp, action_taken, mflow, cl_to_mir, mir_to_cl>>
+
+\* -----------------------------------------------------------------------------
+\* Projection to the MirrorStep vocabulary of MinimalTraceCheck
+\* ("Init" | "Tick" | "RecvReport" | "StepOk" | "Mismatch" | "AllDone").
+\* The runner compares ProjectTrace(expected actions) against the
+\* normalized MirrorStep sequence produced by a real ModelMirrors run.
+\* -----------------------------------------------------------------------------
+
+ProjectAction(a) ==
+  CASE a = "ClientRecvInitialState"    -> <<"Init">>
+    [] a = "ClientRecvNextStep"        -> <<"Tick">>
+    [] a = "MirrorRecvReportOk"        -> <<"RecvReport", "StepOk">>
+    [] a = "MirrorRecvReportAllDone"   -> <<"RecvReport", "AllDone">>
+    [] a = "MirrorRecvReportMismatch"  -> <<"RecvReport", "Mismatch">>
+    [] OTHER                           -> <<>>
+
+ProjectTrace(actions) ==
+  LET AppendStep(acc, a) == acc \o ProjectAction(a)
+  IN ApaFoldSeqLeft(AppendStep, <<>>, actions)
 
 ==============================================================================

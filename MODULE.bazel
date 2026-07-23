@@ -75,6 +75,7 @@ stack_snapshot.package(name = "http-client")
 stack_snapshot.package(name = "http-types")
 stack_snapshot.package(name = "network")
 stack_snapshot.package(name = "process")
+stack_snapshot.package(name = "temporary")
 stack_snapshot.package(name = "text")
 
 stack_snapshot.package(name = "tasty")

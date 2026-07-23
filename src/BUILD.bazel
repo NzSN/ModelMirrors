@@ -17,6 +17,7 @@ haskell_library(
         "@stackage//:http-types",
         "@stackage//:network",
         "@stackage//:process",
+        "@stackage//:temporary",
         "@stackage//:text",
     ],
 )

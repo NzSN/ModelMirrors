@@ -327,10 +327,7 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
                             ,T.pack "ClientRegisterExplore"
                             ,T.pack "ClientRegisterExploreSession"
                             ,T.pack "ClientRecvRegisterError"
-                            ,T.pack "ClientRecvProtocolError"
-                            ,T.pack "MirrorSendSpecValidatedInvalid"
                             ,T.pack "MirrorSendRegisterError"
-                            ,T.pack "MirrorSendProtocolError"
                             ]) acts)
         ) traces
   assertBool "at least one applicable trace" (not (null applicable))
@@ -354,7 +351,10 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
                                             , "Mirror" `T.isPrefixOf` actionTake s
                                             ]
         specStepCount = length [ () | s <- cycleSteps
-                                  , actionTake s == T.pack "MirrorRecvReportState"
+                                  , actionTake s `elem` [ T.pack "MirrorRecvReportOk"
+                                                        , T.pack "MirrorRecvReportAllDone"
+                                                        , T.pack "MirrorRecvReportMismatch"
+                                                        ]
                                   ]
 
     (clientEnd, mirrorEnd) <- newMockTransport
@@ -373,16 +373,26 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
       Nothing -> assertFailure "mirror did not complete within timeout"
       Just (Left e) -> assertFailure $ "mirror threw exception: " ++ e
       Just (Right implSteps) -> do
-        let stepCanon a
-              | a == T.pack "MirrorSendStepOk" = T.pack "MirrorRecvReportState"
-              | a == T.pack "MirrorSendStepMismatch" = T.pack "MirrorRecvReportState"
+        let -- the model's Ok/AllDone/Mismatch branch at each report is not
+            -- controllable from outside (a conforming client always yields
+            -- StepOk); compare protocol shape, not branch choice
+            isReport a = a `elem` [ T.pack "MirrorRecvReportOk"
+                                  , T.pack "MirrorRecvReportAllDone"
+                                  , T.pack "MirrorRecvReportMismatch" ]
+            stepCanon a
+              | a == T.pack "MirrorSendStepOk" = T.pack "MirrorRecvReport"
+              | a == T.pack "MirrorSendStepMismatch" = T.pack "MirrorRecvReport"
+              -- after normalize, a standalone RecvReportState is the last-step
+              -- report whose AllStepsDone was stripped
+              | a == T.pack "MirrorRecvReportState" = T.pack "MirrorRecvReport"
               | otherwise = a
+            specShape = [ if isReport a then T.pack "MirrorRecvReport" else a | a <- specActions ]
             implActions = map (stepCanon . mirrorStepActionName) (normalize implSteps)
             implTrimmed = take (2 * specStepCount + 1) implActions
-        unless (specActions == implTrimmed) $
+        unless (specShape == implTrimmed) $
           assertFailure $ unlines $
             ("protocol trace mismatch:")
-            : [ "  spec:   " ++ show specActions
+            : [ "  spec:   " ++ show specShape
               , "  impl:   " ++ show implTrimmed
               , "  raw:    " ++ show (map mirrorStepActionName implSteps)
               ]
@@ -477,7 +487,7 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
         "ClientReport" -> do
           sendMsg clientEnd $ ReportState dummyState
           pure (i, ("send ReportState", True, "ok"))
-        _ | at == "MirrorSendSpecValidatedValid" || at == "MirrorSendSpecValidatedInvalid" || at == "MirrorSendRegisterError" -> do
+        _ | at == "MirrorSendSpecValidatedValid" || at == "MirrorSendRegisterError" -> do
           msg <- recvOrDie "SpecValidated or RegisterError"
           let ok = case msg of
                 Right (SpecValidated _) -> True
@@ -490,7 +500,7 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
         "MirrorSendNextStep" -> do
           msg <- recvOrDie "NextStep"
           pure (i, ("recv NextStep", checkNextStep msg, showMsg msg))
-        "MirrorRecvReportState" -> do
+        _ | at `elem` ["MirrorRecvReportOk", "MirrorRecvReportAllDone", "MirrorRecvReportMismatch"] -> do
           msg <- recvOrDie "step result"
           let ok = case msg of
                 Right StepOk             -> True
