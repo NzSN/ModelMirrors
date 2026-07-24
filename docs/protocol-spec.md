@@ -270,6 +270,8 @@ State maps carry typed values. The JSON encoding distinguishes TLA+ types:
 
 ## Protocol State Machine
 
+The full client and mirror phase machines (from `specs/MirrorProtocol.tla`) are diagrammed in [`mirror-protocol-state-machine.svg`](mirror-protocol-state-machine.svg) ([Graphviz source](mirror-protocol-state-machine.dot)).
+
 ```
                       ┌─────────┐
                       │  Idle   │

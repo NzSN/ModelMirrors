@@ -1,0 +1,725 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="1000"
+   height="780"
+   font-family="monospace"
+   version="1.1"
+   id="svg52"
+   sodipodi:docname="mirror-protocol-state-machine.svg"
+   inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview52"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.5501956"
+     inkscape:cx="466.39275"
+     inkscape:cy="437.68669"
+     inkscape:window-width="1920"
+     inkscape:window-height="1057"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg52" />
+  <defs
+     id="defs1">
+    <marker
+       id="arr"
+       viewBox="0 0 10 10"
+       refX="9"
+       refY="5"
+       markerWidth="7"
+       markerHeight="7"
+       orient="auto-start-reverse">
+      <path
+         d="M 0 0 L 10 5 L 0 10 z"
+         fill="#333"
+         id="path1" />
+    </marker>
+  </defs>
+  <rect
+     width="1000"
+     height="780"
+     fill="#ffffff"
+     id="rect1"
+     x="44.245613"
+     y="64.771927" />
+  <text
+     x="500.0"
+     y="26"
+     font-size="15"
+     text-anchor="middle"
+     font-weight="bold"
+     id="text1">MirrorProtocol.tla — client and mirror phase machines</text>
+  <rect
+     x="40"
+     y="42"
+     width="440"
+     height="710"
+     rx="12"
+     fill="none"
+     stroke="steelblue"
+     stroke-width="2"
+     id="rect2" />
+  <text
+     x="260"
+     y="58"
+     font-size="12"
+     text-anchor="middle"
+     fill="steelblue"
+     id="text2">client (cp)</text>
+  <rect
+     x="520"
+     y="42"
+     width="440"
+     height="710"
+     rx="12"
+     fill="none"
+     stroke="darkorange"
+     stroke-width="2"
+     id="rect3" />
+  <text
+     x="740"
+     y="58"
+     font-size="12"
+     text-anchor="middle"
+     fill="darkorange"
+     id="text3">mirror (mp)</text>
+  <path
+     d="M 230 87.0 Q 170.0 127.5 160 168.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path3" />
+  <text
+     x="186.5"
+     y="127.5"
+     font-size="9"
+     fill="#333"
+     id="text4">ClientRegister / ClientRegisterTraces /</text>
+  <text
+     x="186.5"
+     y="138.5"
+     font-size="9"
+     fill="#333"
+     id="text5">ClientRegisterExplore / ClientRegisterExploreSession</text>
+  <path
+     d="M 325.0 70 Q 330.0 127.5 295.0 185"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path5" />
+  <text
+     x="329.47369"
+     y="117.00877"
+     font-size="9px"
+     fill="#333333"
+     id="text6">ClientRegisterGenTraces</text>
+  <path
+     d="M 160 202.0 Q 160.0 242.5 160 283.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path6" />
+  <text
+     x="164.0"
+     y="242.5"
+     font-size="9"
+     fill="#333"
+     id="text7">ClientRecvSpecValidated</text>
+  <path
+     d="M 160 202.0 Q 150.0 422.5 230 643.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path7" />
+  <text
+     x="176"
+     y="258"
+     font-size="9"
+     fill="#333"
+     id="text8">ClientRecvRegisterError</text>
+  <path
+     d="M 160 202.0 Q 300.0 300.0 390 398.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path8" />
+  <text
+     x="291.5"
+     y="300.0"
+     font-size="9"
+     fill="#333"
+     id="text9">ClientRecvExplorerReady</text>
+  <path
+     d="M 295.0 185 Q 335.0 127.5 325.0 70"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path9" />
+  <text
+     x="329.92105"
+     y="109.25439"
+     font-size="9px"
+     fill="#333333"
+     id="text10">ClientRecvGenTracesDone</text>
+  <path
+     d="M 160 317.0 Q 160.0 357.5 160 398.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path10" />
+  <text
+     x="164.0"
+     y="357.5"
+     font-size="9"
+     fill="#333"
+     id="text11">ClientRecvInitialState</text>
+  <path
+     d="M 160 432.0 Q 160.0 472.5 160 513.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path11" />
+  <text
+     x="78.07077"
+     y="477.3381"
+     font-size="9px"
+     fill="#333333"
+     id="text12">ClientReport</text>
+  <path
+     d="M 160 513.0 Q 135.0 472.5 160 432.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path12" />
+  <text
+     x="166.79298"
+     y="469.61615"
+     font-size="9px"
+     fill="#333333"
+     id="text13">ClientRecvNextStep</text>
+  <path
+     d="M 255.0 524 a 26 26 0 1 1 -0.1 -14"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path13" />
+  <text
+     x="287.0"
+     y="518"
+     font-size="9"
+     fill="#333"
+     id="text14">ClientRecvStepOk</text>
+  <path
+     d="M 160 547.0 Q 195.0 595.0 230 643.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path14" />
+  <text
+     x="199.0"
+     y="595.0"
+     font-size="9"
+     fill="#333"
+     id="text15">ClientRecvAllStepsDone /</text>
+  <text
+     x="199.0"
+     y="606.0"
+     font-size="9"
+     fill="#333"
+     id="text16">ClientRecvStepMismatch</text>
+  <path
+     d="M 485.0 409 a 26 26 0 1 1 -0.1 -14"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path16" />
+  <text
+     x="517.0"
+     y="403"
+     font-size="9"
+     fill="#333"
+     id="text17">ClientExploreCmd /</text>
+  <text
+     x="517.0"
+     y="414"
+     font-size="9"
+     fill="#333"
+     id="text18">ClientRecvExploreResult</text>
+  <path
+     d="M 390 432.0 Q 390.0 472.5 390 513.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path18" />
+  <text
+     x="394.0"
+     y="472.5"
+     font-size="9"
+     fill="#333"
+     id="text19">ClientExploreDone</text>
+  <path
+     d="M 295.0 530 Q 330.0 595.0 325.0 660"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path19" />
+  <text
+     x="324.0"
+     y="595.0"
+     font-size="9"
+     fill="#333"
+     id="text20">ClientRecvExploreDoneAck</text>
+  <path
+     d="M 700 87.0 Q 645.0 127.5 630 168.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path20" />
+  <text
+     x="659.0"
+     y="127.5"
+     font-size="9"
+     fill="#333"
+     id="text21">MirrorRecvRegister /</text>
+  <text
+     x="659.0"
+     y="138.5"
+     font-size="9"
+     fill="#333"
+     id="text22">MirrorRecvRegisterExplore /</text>
+  <text
+     x="659.0"
+     y="149.5"
+     font-size="9"
+     fill="#333"
+     id="text23">MirrorRecvRegisterExploreSession</text>
+  <path
+     d="M 700 87.0 Q 690.0 185.0 630 283.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path23" />
+  <text
+     x="681.5"
+     y="185.0"
+     font-size="9"
+     fill="#333"
+     id="text24">MirrorRecvRegisterTraces</text>
+  <text
+     x="681.5"
+     y="196.0"
+     font-size="9"
+     fill="#333"
+     id="text25">(+SPEC_VALIDATED)</text>
+  <path
+     d="M 795.0 70 Q 800.0 127.5 765.0 185"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path25" />
+  <text
+     x="798.10529"
+     y="119.28947"
+     font-size="9px"
+     fill="#333333"
+     id="text26">MirrorRecvRegisterGenTraces</text>
+  <path
+     d="M 630 202.0 Q 630.0 242.5 630 283.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path26" />
+  <text
+     x="634.0"
+     y="242.5"
+     font-size="9"
+     fill="#333"
+     id="text27">MirrorSendSpecValidatedValid</text>
+  <path
+     d="M 630 202.0 Q 620.0 422.5 700 643.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path27" />
+  <text
+     x="646"
+     y="258"
+     font-size="9"
+     fill="#333"
+     id="text28">MirrorSendRegisterError</text>
+  <path
+     d="M 630 202.0 Q 775.0 300.0 860 398.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path28" />
+  <text
+     x="764.0"
+     y="300.0"
+     font-size="9"
+     fill="#333"
+     id="text29">MirrorSendExplorerReady</text>
+  <path
+     d="M 765.0 185 Q 805.0 127.5 795.0 70"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path29" />
+  <text
+     x="799.23682"
+     y="108.79825"
+     font-size="9px"
+     fill="#333333"
+     id="text30">MirrorSendGenTracesDone</text>
+  <path
+     d="M 630 317.0 Q 630.0 385.0 630 453.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path30" />
+  <text
+     x="634.0"
+     y="385.0"
+     font-size="9"
+     fill="#333"
+     id="text31">MirrorSendInitialState</text>
+  <path
+     d="M 725.0 464 a 26 26 0 1 1 -0.1 -14"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path31" />
+  <text
+     x="757.0"
+     y="458"
+     font-size="9"
+     fill="#333"
+     id="text32">MirrorRecvReportOk /</text>
+  <text
+     x="757.0"
+     y="469"
+     font-size="9"
+     fill="#333"
+     id="text33">MirrorSendNextStep</text>
+  <path
+     d="M 630 487.0 Q 665.0 565.0 700 643.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path33" />
+  <text
+     x="669.0"
+     y="565.0"
+     font-size="9"
+     fill="#333"
+     id="text34">MirrorRecvReportAllDone /</text>
+  <text
+     x="669.0"
+     y="576.0"
+     font-size="9"
+     fill="#333"
+     id="text35">MirrorRecvReportMismatch</text>
+  <path
+     d="M 860 432.0 Q 805.0 537.5 700 643.0"
+     fill="none"
+     stroke="#333"
+     stroke-width="1.2"
+     marker-end="url(#arr)"
+     id="path35" />
+  <text
+     x="796.5"
+     y="537.5"
+     font-size="9"
+     fill="#333"
+     id="text36">MirrorRecvExploreDone</text>
+  <rect
+     x="135.0"
+     y="53.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#add8e6"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect36" />
+  <text
+     x="230"
+     y="74"
+     font-size="11"
+     text-anchor="middle"
+     id="text37">idle</text>
+  <rect
+     x="65.0"
+     y="168.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect37" />
+  <text
+     x="160"
+     y="189"
+     font-size="11"
+     text-anchor="middle"
+     id="text38">waiting_validation</text>
+  <rect
+     x="295.0"
+     y="168.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect38" />
+  <text
+     x="390"
+     y="189"
+     font-size="11"
+     text-anchor="middle"
+     id="text39">waiting_gen</text>
+  <rect
+     x="65.0"
+     y="283.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect39" />
+  <text
+     x="160"
+     y="304"
+     font-size="11"
+     text-anchor="middle"
+     id="text40">waiting_init</text>
+  <rect
+     x="65.0"
+     y="398.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect40" />
+  <text
+     x="160"
+     y="419"
+     font-size="11"
+     text-anchor="middle"
+     id="text41">waiting_action</text>
+  <rect
+     x="65.0"
+     y="513.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect41" />
+  <text
+     x="160"
+     y="534"
+     font-size="11"
+     text-anchor="middle"
+     id="text42">waiting_ack</text>
+  <rect
+     x="295.0"
+     y="398.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect42" />
+  <text
+     x="390"
+     y="419"
+     font-size="11"
+     text-anchor="middle"
+     id="text43">exploring</text>
+  <rect
+     x="295.0"
+     y="513.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect43" />
+  <text
+     x="390"
+     y="534"
+     font-size="11"
+     text-anchor="middle"
+     id="text44">waiting_done</text>
+  <rect
+     x="135.0"
+     y="643.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#90ee90"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect44" />
+  <text
+     x="230"
+     y="664"
+     font-size="11"
+     text-anchor="middle"
+     id="text45">done</text>
+  <rect
+     x="605.0"
+     y="53.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#add8e6"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect45" />
+  <text
+     x="700"
+     y="74"
+     font-size="11"
+     text-anchor="middle"
+     id="text46">idle</text>
+  <rect
+     x="535.0"
+     y="168.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect46" />
+  <text
+     x="630"
+     y="189"
+     font-size="11"
+     text-anchor="middle"
+     id="text47">validating</text>
+  <rect
+     x="765.0"
+     y="168.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect47" />
+  <text
+     x="860"
+     y="189"
+     font-size="11"
+     text-anchor="middle"
+     id="text48">generating</text>
+  <rect
+     x="535.0"
+     y="283.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect48" />
+  <text
+     x="630"
+     y="304"
+     font-size="11"
+     text-anchor="middle"
+     id="text49">ready</text>
+  <rect
+     x="535.0"
+     y="453.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect49" />
+  <text
+     x="630"
+     y="474"
+     font-size="11"
+     text-anchor="middle"
+     id="text50">stepping</text>
+  <rect
+     x="765.0"
+     y="398.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#f2f2f2"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect50" />
+  <text
+     x="860"
+     y="419"
+     font-size="11"
+     text-anchor="middle"
+     id="text51">exploring</text>
+  <rect
+     x="605.0"
+     y="643.0"
+     width="190"
+     height="34"
+     rx="6"
+     fill="#90ee90"
+     stroke="#333"
+     stroke-width="1.2"
+     id="rect51" />
+  <text
+     x="700"
+     y="664"
+     font-size="11"
+     text-anchor="middle"
+     id="text52">done</text>
+</svg>

@@ -14,7 +14,7 @@
       "mflow": "Str"
     },
     "format-description": "https://apalache-mc.org/docs/adr/015adr-trace.html",
-    "description": "Created by Apalache on Fri Jul 24 12:39:46 CST 2026"
+    "description": "Created by Apalache on Fri Jul 24 12:39:54 CST 2026"
   },
   "vars": [
     "mp",
@@ -48,11 +48,11 @@
       "#meta": {
         "index": 1
       },
-      "action_taken": "ClientRegisterExploreSession",
+      "action_taken": "ClientRegister",
       "cl_closed": false,
       "cl_to_mir": [
         {
-          "#bigint": "14"
+          "#bigint": "0"
         }
       ],
       "cp": "waiting_validation",
@@ -67,12 +67,12 @@
       "#meta": {
         "index": 2
       },
-      "action_taken": "MirrorRecvRegisterExploreSession",
+      "action_taken": "MirrorRecvRegister",
       "cl_closed": false,
       "cl_to_mir": [],
       "cp": "waiting_validation",
       "faulted": false,
-      "mflow": "session",
+      "mflow": "traces",
       "mir_closed": false,
       "mir_to_cl": [],
       "mp": "validating",
@@ -82,84 +82,27 @@
       "#meta": {
         "index": 3
       },
-      "action_taken": "MirrorSendExplorerReady",
-      "cl_closed": false,
+      "action_taken": "ClientCloseConn",
+      "cl_closed": true,
       "cl_to_mir": [],
       "cp": "waiting_validation",
-      "faulted": false,
-      "mflow": "session",
+      "faulted": true,
+      "mflow": "traces",
       "mir_closed": false,
-      "mir_to_cl": [
-        {
-          "#bigint": "15"
-        }
-      ],
-      "mp": "exploring",
+      "mir_to_cl": [],
+      "mp": "validating",
       "report_matches": false
     },
     {
       "#meta": {
         "index": 4
       },
-      "action_taken": "ClientRecvExplorerReady",
-      "cl_closed": false,
+      "action_taken": "MirrorDetectClose",
+      "cl_closed": true,
       "cl_to_mir": [],
-      "cp": "exploring",
-      "faulted": false,
-      "mflow": "session",
-      "mir_closed": false,
-      "mir_to_cl": [],
-      "mp": "exploring",
-      "report_matches": false
-    },
-    {
-      "#meta": {
-        "index": 5
-      },
-      "action_taken": "ClientExploreDone",
-      "cl_closed": false,
-      "cl_to_mir": [
-        {
-          "#bigint": "18"
-        }
-      ],
-      "cp": "waiting_done",
-      "faulted": false,
-      "mflow": "session",
-      "mir_closed": false,
-      "mir_to_cl": [],
-      "mp": "exploring",
-      "report_matches": false
-    },
-    {
-      "#meta": {
-        "index": 6
-      },
-      "action_taken": "MirrorRecvExploreDone",
-      "cl_closed": false,
-      "cl_to_mir": [],
-      "cp": "waiting_done",
-      "faulted": false,
-      "mflow": "session",
-      "mir_closed": false,
-      "mir_to_cl": [
-        {
-          "#bigint": "18"
-        }
-      ],
-      "mp": "done",
-      "report_matches": false
-    },
-    {
-      "#meta": {
-        "index": 7
-      },
-      "action_taken": "ClientRecvExploreDoneAck",
-      "cl_closed": false,
-      "cl_to_mir": [],
-      "cp": "done",
-      "faulted": false,
-      "mflow": "session",
+      "cp": "waiting_validation",
+      "faulted": true,
+      "mflow": "traces",
       "mir_closed": false,
       "mir_to_cl": [],
       "mp": "done",

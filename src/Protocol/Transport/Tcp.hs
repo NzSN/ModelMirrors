@@ -1,6 +1,7 @@
 module Protocol.Transport.Tcp
   ( TcpTransport
   , tcpTransport
+  , tcpClose
   , serveTcp
   , serveTcpConcurrent
   ) where
@@ -32,6 +33,7 @@ import Protocol.Transport.Core (Transport (..))
 import System.IO
   ( Handle
   , IOMode (..)
+  , hClose
   , hFlush
   , hPrint
   , stderr
@@ -41,6 +43,13 @@ newtype TcpTransport = TcpTransport Handle
 
 tcpTransport :: Socket -> IO TcpTransport
 tcpTransport sock = TcpTransport <$> socketToHandle sock ReadWriteMode
+
+-- | Close the underlying handle. Note: 'close' on the original
+-- 'Socket' is a no-op after 'tcpTransport' (socketToHandle takes
+-- ownership of the file descriptor), so connections must be closed
+-- through this function for the peer to see a disconnect.
+tcpClose :: TcpTransport -> IO ()
+tcpClose (TcpTransport h) = hClose h
 
 instance Transport TcpTransport where
   send (TcpTransport h) bs = B8.hPutStrLn h bs >> hFlush h
@@ -62,7 +71,7 @@ serveTcp port = withSocketsDo $ do
       t <- tcpTransport conn
       r <- try (run t)
       case r of
-        Left (e :: IOException) -> hPrint stderr e
+        Left (e :: SomeException) -> hPrint stderr e
         Right _ -> pure ()
       close conn
   where

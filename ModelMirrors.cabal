@@ -118,7 +118,9 @@ library
         crypton-x509-store >=1.9
 
     -- Directories containing source files.
-    hs-source-dirs:   src
+    -- src-tls holds the cabal-only TLS modules (Bazel can't build the
+    -- tls dependency chain; a stub lives in bazel-stubs/ instead).
+    hs-source-dirs:   src, src-tls
 
     -- Base language which the package is written in.
     default-language: GHC2024

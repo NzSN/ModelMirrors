@@ -2,19 +2,22 @@ load("@rules_haskell//haskell:defs.bzl", "haskell_test")
 
 haskell_test(
     name = "ModelMirrors-test",
+    size = "large",
     srcs = glob(
         ["**/*.hs"],
-        exclude = ["specs/**"],
+        exclude = ["specs/**", "TlsTransportSpec.hs"],
     ),
     ghcopts = ["-Wall", "-XGHC2024"],
     data = glob(["specs/*.tla"]) + [
         "//:specs/MirrorProtocol.tla",
         "//:specs/AapalacheRPCProtocol.tla",
         "//:specs/ApalacheRPCClient.tla",
+        "//:witness-traces",
         "//app:ModelMirrors",
     ],
     deps = [
         "//src:ModelMirrors",
+        "//stubs:stubs",
         "//:base",
         "@apalache_mc//:apalache-mc",
         "@stackage//:aeson",

@@ -1,23 +1,31 @@
 {
   "#meta": {
     "format": "ITF",
-    "format-description": "https://apalache-mc.org/docs/adr/015adr-trace.html",
-    "description": "Created by Apalache on Fri Jul 24 00:19:05 CST 2026",
     "varTypes": {
       "mp": "Str",
-      "mir_to_cl": "Int",
+      "cl_closed": "Bool",
+      "mir_to_cl": "Seq(Int)",
       "cp": "Str",
       "action_taken": "Str",
-      "cl_to_mir": "Int",
+      "faulted": "Bool",
+      "cl_to_mir": "Seq(Int)",
+      "report_matches": "Bool",
+      "mir_closed": "Bool",
       "mflow": "Str"
-    }
+    },
+    "format-description": "https://apalache-mc.org/docs/adr/015adr-trace.html",
+    "description": "Created by Apalache on Fri Jul 24 12:39:16 CST 2026"
   },
   "vars": [
     "mp",
+    "cl_closed",
     "mir_to_cl",
     "cp",
     "action_taken",
+    "faulted",
     "cl_to_mir",
+    "report_matches",
+    "mir_closed",
     "mflow"
   ],
   "states": [
@@ -26,135 +34,155 @@
         "index": 0
       },
       "action_taken": "init",
-      "cl_to_mir": {
-        "#bigint": "-1"
-      },
+      "cl_closed": false,
+      "cl_to_mir": [],
       "cp": "idle",
+      "faulted": false,
       "mflow": "none",
-      "mir_to_cl": {
-        "#bigint": "-1"
-      },
-      "mp": "idle"
+      "mir_closed": false,
+      "mir_to_cl": [],
+      "mp": "idle",
+      "report_matches": false
     },
     {
       "#meta": {
         "index": 1
       },
       "action_taken": "ClientRegisterTraces",
-      "cl_to_mir": {
-        "#bigint": "10"
-      },
+      "cl_closed": false,
+      "cl_to_mir": [
+        {
+          "#bigint": "10"
+        }
+      ],
       "cp": "waiting_validation",
+      "faulted": false,
       "mflow": "none",
-      "mir_to_cl": {
-        "#bigint": "-1"
-      },
-      "mp": "idle"
+      "mir_closed": false,
+      "mir_to_cl": [],
+      "mp": "idle",
+      "report_matches": false
     },
     {
       "#meta": {
         "index": 2
       },
       "action_taken": "MirrorRecvRegisterTraces",
-      "cl_to_mir": {
-        "#bigint": "-1"
-      },
+      "cl_closed": false,
+      "cl_to_mir": [],
       "cp": "waiting_validation",
+      "faulted": false,
       "mflow": "traces",
-      "mir_to_cl": {
-        "#bigint": "3"
-      },
-      "mp": "ready"
+      "mir_closed": false,
+      "mir_to_cl": [
+        {
+          "#bigint": "3"
+        }
+      ],
+      "mp": "ready",
+      "report_matches": false
     },
     {
       "#meta": {
         "index": 3
       },
       "action_taken": "ClientRecvSpecValidated",
-      "cl_to_mir": {
-        "#bigint": "-1"
-      },
+      "cl_closed": false,
+      "cl_to_mir": [],
       "cp": "waiting_init",
+      "faulted": false,
       "mflow": "traces",
-      "mir_to_cl": {
-        "#bigint": "-1"
-      },
-      "mp": "ready"
+      "mir_closed": false,
+      "mir_to_cl": [],
+      "mp": "ready",
+      "report_matches": false
     },
     {
       "#meta": {
         "index": 4
       },
       "action_taken": "MirrorSendInitialState",
-      "cl_to_mir": {
-        "#bigint": "-1"
-      },
+      "cl_closed": false,
+      "cl_to_mir": [],
       "cp": "waiting_init",
+      "faulted": false,
       "mflow": "traces",
-      "mir_to_cl": {
-        "#bigint": "4"
-      },
-      "mp": "stepping"
+      "mir_closed": false,
+      "mir_to_cl": [
+        {
+          "#bigint": "4"
+        }
+      ],
+      "mp": "stepping",
+      "report_matches": false
     },
     {
       "#meta": {
         "index": 5
       },
       "action_taken": "ClientRecvInitialState",
-      "cl_to_mir": {
-        "#bigint": "-1"
-      },
+      "cl_closed": false,
+      "cl_to_mir": [],
       "cp": "waiting_action",
+      "faulted": false,
       "mflow": "traces",
-      "mir_to_cl": {
-        "#bigint": "-1"
-      },
-      "mp": "stepping"
+      "mir_closed": false,
+      "mir_to_cl": [],
+      "mp": "stepping",
+      "report_matches": false
     },
     {
       "#meta": {
         "index": 6
       },
       "action_taken": "ClientReport",
-      "cl_to_mir": {
-        "#bigint": "2"
-      },
+      "cl_closed": false,
+      "cl_to_mir": [
+        {
+          "#bigint": "2"
+        }
+      ],
       "cp": "waiting_ack",
+      "faulted": false,
       "mflow": "traces",
-      "mir_to_cl": {
-        "#bigint": "-1"
-      },
-      "mp": "stepping"
+      "mir_closed": false,
+      "mir_to_cl": [],
+      "mp": "stepping",
+      "report_matches": true
     },
     {
       "#meta": {
         "index": 7
       },
       "action_taken": "MirrorRecvReportAllDone",
-      "cl_to_mir": {
-        "#bigint": "-1"
-      },
+      "cl_closed": false,
+      "cl_to_mir": [],
       "cp": "waiting_ack",
+      "faulted": false,
       "mflow": "traces",
-      "mir_to_cl": {
-        "#bigint": "8"
-      },
-      "mp": "done"
+      "mir_closed": false,
+      "mir_to_cl": [
+        {
+          "#bigint": "8"
+        }
+      ],
+      "mp": "done",
+      "report_matches": true
     },
     {
       "#meta": {
         "index": 8
       },
       "action_taken": "ClientRecvAllStepsDone",
-      "cl_to_mir": {
-        "#bigint": "-1"
-      },
+      "cl_closed": false,
+      "cl_to_mir": [],
       "cp": "done",
+      "faulted": false,
       "mflow": "traces",
-      "mir_to_cl": {
-        "#bigint": "-1"
-      },
-      "mp": "done"
+      "mir_closed": false,
+      "mir_to_cl": [],
+      "mp": "done",
+      "report_matches": true
     }
   ]
 }

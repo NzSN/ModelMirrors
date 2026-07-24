@@ -1,7 +1,8 @@
 # MBT: remaining work
 
-Status as of the MBT bring-up (see `specs/MirrorProtocol.tla`,
-`specs/MirrorProtocolWitness.tla`, `specs/traces/`, `test/MirrorProtocolSpec.hs`).
+All items complete as of this update (see `specs/MirrorProtocol.tla`,
+`specs/MirrorProtocolFaults.tla`, `specs/MirrorProtocolWitness.tla`,
+`specs/traces/`, `test/MirrorProtocolSpec.hs`).
 
 Done: protocol model fixed (dead `PROTOCOL_ERROR` path removed,
 `MirrorSendSpecValidatedInvalid` removed, report action split into
@@ -10,22 +11,41 @@ Done: protocol model fixed (dead `PROTOCOL_ERROR` path removed,
 witness traces exported for all flows, `testMbtMirrorProtocol` conformance
 driver green (protocol-shape comparison).
 
-Remaining:
+Completed remaining items:
 
-1. **Controllable match/mismatch testing** — add a payload bit to the model
-   (e.g. `report_matches \in BOOLEAN`) so the model, not the fixture, decides
-   the Ok/Mismatch branch; the driver then reports a deliberately wrong state
-   to exercise the mismatch path deterministically. Currently the branch is
-   uncontrollable and only protocol shape is compared.
-2. **Transport coverage** — run the MBT driver over `Stdio`/`Tcp`/`Tls`
-   transports in addition to `Mock` (gate slower suites behind a flag).
-3. **Fault injection** — multi-element channels in the model plus drop,
-   reorder, and premature-close actions for negative tests; expect
-   `REGISTER_ERROR`/disconnect handling on the impl side.
-4. **Witness traces checked into CI** — regenerate `specs/traces/*.itf.json`
-   from `MirrorProtocolWitness.tla` in CI and use them as fixed regression
-   scenarios (not only freshly sampled traces).
-5. **Bazel build** — `bazel build //...` still fails: TLS deps (`tls`,
-   `crypton*`) are cabal-only (`hpke` doesn't build under rules_haskell);
-   `Protocol.Transport.Tls` must be excluded or split out of
-   `src/BUILD.bazel`'s glob for the Bazel build to pass.
+1. **Controllable match/mismatch testing** — DONE. `report_matches \in
+   BOOLEAN` added to the model (set nondeterministically by `ClientReport`;
+   the three `MirrorRecvReport*` actions are gated on it). The driver
+   extracts the bit sequence and reports a deliberately wrong state on
+   mismatch reports, so Ok/AllDone/Mismatch branches are exercised
+   deterministically; branch comparison is exact (with the AllDone
+   abstraction: model `AllDone` ≍ impl `Ok* AllDone`, no impl mismatch).
+2. **Transport coverage** — DONE. `testMbtTransports` runs the MBT driver
+   over `stdio` (spawned mirror process), `tcp`, and `tls`
+   (`serveTlsConcurrent`), gated behind `MBT_TRANSPORTS` (comma-separated;
+   unset = no-op, so Bazel/default runs skip it).
+3. **Fault injection** — DONE. Channels are multi-element message queues
+   (`Seq(Int)`); `specs/MirrorProtocolFaults.tla` adds drop, duplicate,
+   and premature-close actions plus a `faulted` flag scoping
+   `ClientNeverStuck` to fault-free paths. Impl side: `protocol_error` is
+   now sent on undecodable/unexpected mid-session input before the session
+   aborts, `serveTcp` catches all per-session exceptions (a client-caused
+   `ProtocolException` no longer kills the accept loop), and
+   unreadable trace files yield `RegisterError` instead of a crash. Tests:
+   out-of-order first message, garbage mid-session, premature close
+   (`testPrematureCloseTcp`; note `tcpClose` — `close` on the socket is a
+   no-op after `socketToHandle`).
+4. **Witness traces in CI** — DONE. `scripts/gen-witness-traces.sh`
+   regenerates `specs/traces/*.itf.json` from `MirrorProtocolWitness.tla`
+   (+ `fault_close` from `MirrorProtocolFaults.tla`);
+   `.github/workflows/witness-traces.yml` regenerates them in CI and fails
+   on `git diff`, then runs `cabal test all`. `testWitnessTracesFixed`
+   replays the checked-in traces as fixed regression scenarios (shared
+   driver with the freshly-sampled MBT test).
+5. **Bazel build** — DONE. TLS sources live in `src-tls/` (cabal-only);
+   `stubs/` provides Bazel-only stub modules (`Protocol.Transport.Tls`,
+   `TlsTransportSpec`). `bazel build //...` and `bazel test` are green.
+   Also fixed along the way: the Bazel test sandbox needs a locale
+   (`.bazelrc` sets `LANG`/`LC_ALL=C.UTF-8`; without it apalache-mc fails
+   with `Configuration error: Input length = 1`) and `size = "large"` for
+   the ~400s suite; `specs/traces` added to test data.

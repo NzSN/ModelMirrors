@@ -1,0 +1,18 @@
+load("@rules_haskell//haskell:defs.bzl", "haskell_library")
+
+# Bazel-only stubs for cabal-only modules (the tls dependency chain does
+# not build under rules_haskell). Protocol.Transport.Tls backs app/Main;
+# TlsTransportSpec backs the test runner. Never add these to cabal builds.
+haskell_library(
+    name = "stubs",
+    srcs = glob(["**/*.hs"]),
+    ghcopts = ["-Wall", "-XGHC2024"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//:base",
+        "//src:ModelMirrors",
+        "@stackage//:network",
+        "@stackage//:tasty",
+        "@stackage//:text",
+    ],
+)

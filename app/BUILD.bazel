@@ -6,7 +6,9 @@ haskell_binary(
     ghcopts = ["-Wall", "-XGHC2024"],
     deps = [
         "//src:ModelMirrors",
+        "//stubs:stubs",
         "//:base",
+        "//:unix",
         "@stackage//:containers",
         "@stackage//:text",
     ],

@@ -7,7 +7,18 @@ exports_files([
     "specs/ApalacheRPCClient.tla",
 ])
 
+filegroup(
+    name = "witness-traces",
+    srcs = glob(["specs/traces/*.itf.json"]),
+    visibility = ["//visibility:public"],
+)
+
 haskell_toolchain_library(
     name = "base",
+    visibility = ["//visibility:public"],
+)
+
+haskell_toolchain_library(
+    name = "unix",
     visibility = ["//visibility:public"],
 )

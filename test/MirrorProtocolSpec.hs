@@ -12,28 +12,58 @@ import Apalache.Types
     , TraceState (..)
     , Value (..)
     )
-import Control.Concurrent (forkIO)
+import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.MVar
-import Control.Exception (SomeException, catch, try)
+import Control.Exception (IOException, SomeException, catch, try)
 import Control.Monad (unless, forM_)
 import Data.Aeson (FromJSON, encode)
-import qualified Data.ByteString.Lazy as BL
+import Data.ByteString.Char8 qualified as B8
+import Data.ByteString.Lazy qualified as BL
+import Data.IORef (newIORef, readIORef, writeIORef)
 import System.Timeout (timeout)
 import Data.List (isPrefixOf)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import qualified Data.Text as T
+import Network.Socket
+  ( AddrInfo (..)
+  , AddrInfoFlag (..)
+  , PortNumber
+  , SockAddr (..)
+  , Socket
+  , bind
+  , close
+  , connect
+  , defaultHints
+  , getAddrInfo
+  , getSocketName
+  , socket
+  )
 import Engine.Core (traceSteps)
 import Engine.Types (Step (..))
 import Protocol.Core (ClientMessage (..), MirrorMessage (..))
 import Protocol.Format.Json ()
 import MinimalTraceCheck (normalize)
-import Protocol.Client (hourClockClient, runClientWithTraces)
+import Protocol.Client (Client (..), hourClockClient, runClientWithTraces)
 import Protocol.Mirror (mirrorStepActionName, run, runMirrorWithTraces, runMirrorGenTraces)
-import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
+import Protocol.Transport.Core (Transport (..), recvMsg, sendMsg)
 import Protocol.Transport.Mock (MockTransport, newMockTransport)
-import System.Directory (createDirectory, getTemporaryDirectory, removeDirectoryRecursive)
+import Protocol.Transport.Tcp (serveTcp, tcpClose, tcpTransport)
+import Protocol.Transport.Tls (connectTls, mkClientParams, mkServerParams, serveTlsConcurrent)
+import System.Directory (createDirectory, getTemporaryDirectory, listDirectory, removeDirectoryRecursive)
+import System.Environment (lookupEnv)
 import System.FilePath ((</>), takeExtension)
+import System.IO (Handle, hFlush)
+import System.Process
+  ( CreateProcess (..)
+  , StdStream (..)
+  , createProcess
+  , proc
+  , readProcess
+  , terminateProcess
+  , waitForProcess
+  )
+import TlsTransportSpec (Certs (..), genCerts)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, assertBool, assertFailure)
 
@@ -42,6 +72,11 @@ spec = testGroup "MirrorProtocolSpec"
   [ testProtocolTraceGenerated
   , testMirrorFollowsProtocol
   , testMbtMirrorProtocol
+  , testWitnessTracesFixed
+  , testMbtTransports
+  , testOutOfOrderFirstMessage
+  , testGarbageMidSession
+  , testPrematureCloseTcp
   , testRunMirrorWithTracesDir
   , testRunMirrorGenTraces
   , testRunMirrorGenTracesWithDest
@@ -332,70 +367,340 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
         ) traces
   assertBool "at least one applicable trace" (not (null applicable))
 
-  forM_ applicable $ \trace -> do
-    let steps = drop 1 (traceStates trace)
-        isDone s = case (Map.lookup (T.pack "mp") (stateVars s), Map.lookup (T.pack "cp") (stateVars s)) of
-          (Just (VStr p1), _) | p1 == T.pack "done" -> True
-          (_, Just (VStr p2)) | p2 == T.pack "done" -> True
-          _ -> False
-        cycleSteps = case break isDone steps of
-          (pre, t : _) -> pre ++ [t]
-          (pre, [])   -> pre
+  forM_ applicable $ checkTraceAgainstMirror hcTracePaths
 
-        specCanon a
-          | a == T.pack "MirrorRecvRegister" = T.pack "MirrorRecvRegisterTraces"
-          | a == T.pack "MirrorSendSpecValidatedValid" = T.pack ""
-          | otherwise = a
-        specActions = filter (not . T.null) [ specCanon (actionTake s)
-                                            | s <- cycleSteps
-                                            , "Mirror" `T.isPrefixOf` actionTake s
-                                            ]
-        specStepCount = length [ () | s <- cycleSteps
-                                  , actionTake s `elem` [ T.pack "MirrorRecvReportOk"
-                                                        , T.pack "MirrorRecvReportAllDone"
-                                                        , T.pack "MirrorRecvReportMismatch"
-                                                        ]
-                                  ]
+-- | Replay one model trace against the real mirror (mock transport),
+-- following its report_matches guidance, then compare protocol structure
+-- and report branches. Shared by the freshly-sampled MBT test and the
+-- checked-in witness-trace regression test.
+checkTraceAgainstMirror :: [FilePath] -> ItfTrace -> IO ()
+checkTraceAgainstMirror hcTracePaths trace = do
+  let steps = drop 1 (traceStates trace)
+      isDone s = case (Map.lookup (T.pack "mp") (stateVars s), Map.lookup (T.pack "cp") (stateVars s)) of
+        (Just (VStr p1), _) | p1 == T.pack "done" -> True
+        (_, Just (VStr p2)) | p2 == T.pack "done" -> True
+        _ -> False
+      cycleSteps = case break isDone steps of
+        (pre, t : _) -> pre ++ [t]
+        (pre, [])   -> pre
 
-    (clientEnd, mirrorEnd) <- newMockTransport
-    mv <- newEmptyMVar
-    _ <- forkIO $ do
-      result <- try (run mirrorEnd)
-      putMVar mv $ case result of
-        Right stps -> Right stps
-        Left (e :: SomeException) -> Left (show e)
-
-    client <- hourClockClient clientEnd
-    _ <- runClientWithTraces client hcApalacheCfg hcTracePaths
-
-    mResult <- timeout 180_000_000 (readMVar mv)
-    case mResult of
-      Nothing -> assertFailure "mirror did not complete within timeout"
-      Just (Left e) -> assertFailure $ "mirror threw exception: " ++ e
-      Just (Right implSteps) -> do
-        let -- the model's Ok/AllDone/Mismatch branch at each report is not
-            -- controllable from outside (a conforming client always yields
-            -- StepOk); compare protocol shape, not branch choice
-            isReport a = a `elem` [ T.pack "MirrorRecvReportOk"
+      specCanon a
+        | a == T.pack "MirrorRecvRegister" = T.pack "MirrorRecvRegisterTraces"
+        | a == T.pack "MirrorSendSpecValidatedValid" = T.pack ""
+        | otherwise = a
+      specActions = filter (not . T.null) [ specCanon (actionTake s)
+                                          | s <- cycleSteps
+                                          , "Mirror" `T.isPrefixOf` actionTake s
+                                          ]
+      isReportAction a = a `elem` [ T.pack "MirrorRecvReportOk"
                                   , T.pack "MirrorRecvReportAllDone"
                                   , T.pack "MirrorRecvReportMismatch" ]
-            stepCanon a
-              | a == T.pack "MirrorSendStepOk" = T.pack "MirrorRecvReport"
-              | a == T.pack "MirrorSendStepMismatch" = T.pack "MirrorRecvReport"
-              -- after normalize, a standalone RecvReportState is the last-step
-              -- report whose AllStepsDone was stripped
-              | a == T.pack "MirrorRecvReportState" = T.pack "MirrorRecvReport"
-              | otherwise = a
-            specShape = [ if isReport a then T.pack "MirrorRecvReport" else a | a <- specActions ]
-            implActions = map (stepCanon . mirrorStepActionName) (normalize implSteps)
-            implTrimmed = take (2 * specStepCount + 1) implActions
-        unless (specShape == implTrimmed) $
-          assertFailure $ unlines $
-            ("protocol trace mismatch:")
-            : [ "  spec:   " ++ show specShape
-              , "  impl:   " ++ show implTrimmed
-              , "  raw:    " ++ show (map mirrorStepActionName implSteps)
+      specStepCount = length [ () | s <- cycleSteps, isReportAction (actionTake s) ]
+      -- The model decides each report branch via report_matches (set at
+      -- ClientReport); extract the bit sequence so the driver can follow it.
+      reportBits = [ b | s <- cycleSteps
+                       , actionTake s == T.pack "ClientReport"
+                       , Just (VBool b) <- [Map.lookup (T.pack "report_matches") (stateVars s)]
+                       ]
+      anyMismatch = False `elem` reportBits
+
+  (clientEnd, mirrorEnd) <- newMockTransport
+  mv <- newEmptyMVar
+  _ <- forkIO $ do
+    result <- try (run mirrorEnd)
+    putMVar mv $ case result of
+      Right stps -> Right stps
+      Left (e :: SomeException) -> Left (show e)
+
+  client <- hourClockClient clientEnd
+  -- On reports where the model chose report_matches = FALSE, send a
+  -- deliberately wrong state so the mirror must answer StepMismatch.
+  -- Handler calls correspond 1:1 with ClientReport actions, in order.
+  bitsRef <- newIORef reportBits
+  let guidedClient = client
+        { clientHandler = \action prevState -> do
+            bits <- readIORef bitsRef
+            let (matches, rest) = case bits of
+                  [] -> (True, [])
+                  (b : bs) -> (b, bs)
+            writeIORef bitsRef rest
+            if matches
+              then clientHandler client action prevState
+              else pure wrongState
+        }
+  clientResult <- runClientWithTraces guidedClient hcApalacheCfg hcTracePaths
+  case (anyMismatch, clientResult) of
+    (False, Right ()) -> pure ()
+    (True, Left _) -> pure ()
+    (False, Left e) -> assertFailure ("client failed on an all-match trace: " ++ T.unpack e)
+    (True, Right ()) -> assertFailure "client succeeded on a trace containing a mismatch report"
+
+  mResult <- timeout 180_000_000 (readMVar mv)
+  case mResult of
+    Nothing -> assertFailure "mirror did not complete within timeout"
+    Just (Left e) -> assertFailure $ "mirror threw exception: " ++ e
+    Just (Right implSteps) -> do
+      let -- structure comparison: collapse all report branches to a
+          -- single label (old behavior)
+          isReport a = a `elem` [ T.pack "MirrorRecvReportOk"
+                                , T.pack "MirrorRecvReportAllDone"
+                                , T.pack "MirrorRecvReportMismatch" ]
+          structCanon a
+            | a == T.pack "MirrorSendStepOk" = T.pack "MirrorRecvReport"
+            | a == T.pack "MirrorSendStepMismatch" = T.pack "MirrorRecvReport"
+            | a == T.pack "MirrorRecvReportState" = T.pack "MirrorRecvReport"
+            | otherwise = a
+          specShape = [ if isReport a then T.pack "MirrorRecvReport" else a | a <- specActions ]
+          implActions = map (structCanon . mirrorStepActionName) (normalize implSteps)
+          implTrimmed = take (2 * specStepCount + 1) implActions
+      unless (specShape == implTrimmed) $
+        assertFailure $ unlines $
+          ("protocol trace mismatch:")
+          : [ "  spec:   " ++ show specShape
+            , "  impl:   " ++ show implTrimmed
+            , "  raw:    " ++ show (map mirrorStepActionName implSteps)
+            ]
+      -- branch comparison: the model's report branches are controllable
+      -- via report_matches. All but the last spec branch are Ok and must
+      -- match exactly; a final Mismatch must match exactly; a final
+      -- AllDone abstracts the impl's remaining steps, so the impl's
+      -- report at that position may be Ok or AllDone, but the impl run
+      -- must contain no Mismatch anywhere.
+      let branchOf a
+            | a == T.pack "MirrorRecvReportOk" = T.pack "ReportOk"
+            | a == T.pack "MirrorRecvReportAllDone" = T.pack "ReportAllDone"
+            | a == T.pack "MirrorRecvReportMismatch" = T.pack "ReportMismatch"
+            | otherwise = a
+          specBranches = [ branchOf a | a <- specActions, isReport a ]
+          implBranchOf a
+            | a == T.pack "MirrorSendStepOk" = Just (T.pack "ReportOk")
+            | a == T.pack "MirrorSendStepMismatch" = Just (T.pack "ReportMismatch")
+            | a == T.pack "MirrorRecvReportState" = Just (T.pack "ReportAllDone")
+            | otherwise = Nothing
+          implBranchesAll = [ b | s <- normalize implSteps
+                                , Just b <- [implBranchOf (mirrorStepActionName s)]
+                                ]
+          n = length specBranches
+      assertBool "impl has at least as many reports as the spec" (length implBranchesAll >= n)
+      let implBranches = take n implBranchesAll
+      case reverse specBranches of
+        [] -> pure ()
+        (lastSpec : initRev) -> do
+          let initSpecs = reverse initRev
+          unless (initSpecs == take (length initSpecs) implBranches) $
+            assertFailure $ unlines
+              [ "report branch mismatch (prefix):"
+              , "  spec: " ++ show specBranches
+              , "  impl: " ++ show implBranchesAll
               ]
+          let implLast = last implBranches
+              okLast = case lastSpec of
+                _ | lastSpec == T.pack "ReportMismatch" -> implLast == T.pack "ReportMismatch"
+                  | lastSpec == T.pack "ReportAllDone" ->
+                      implLast `elem` [T.pack "ReportOk", T.pack "ReportAllDone"]
+                        && T.pack "ReportMismatch" `notElem` implBranchesAll
+                  | otherwise -> implLast == lastSpec
+          unless okLast $
+            assertFailure $ unlines
+              [ "report branch mismatch (final):"
+              , "  spec last: " ++ show lastSpec
+              , "  impl at pos: " ++ show implLast
+              , "  impl all: " ++ show implBranchesAll
+              ]
+
+-- | Checked-in witness traces (specs/traces/, regenerated from
+-- MirrorProtocolWitness.tla by scripts/gen-witness-traces.sh and kept
+-- up-to-date in CI) replayed as fixed regression scenarios.
+testWitnessTracesFixed :: TestTree
+testWitnessTracesFixed = testCase "witness traces replay as fixed scenarios" $ do
+  files <- filter (T.isSuffixOf (T.pack ".itf.json") . T.pack) <$> listDirectory "specs/traces"
+  assertBool "at least one witness trace" (not (null files))
+  genResult <- generateTraceFiles hcApalacheCfg hcTraceConfig
+  hcTracePaths <- case genResult of
+    Right (_, ps) -> pure (take 1 ps)
+    Left err -> assertFailure $ "pre-generate traces error: " ++ show err
+  forM_ files $ \f -> do
+    etrace <- readTrace ("specs/traces" </> f)
+    trace <- case etrace of
+      Left err -> assertFailure (f ++ ": readTrace failed: " ++ err)
+      Right t -> pure t
+    let acts = map actionTake (traceStates trace)
+        exploreActs = [T.pack "ClientRegisterExploreSession", T.pack "ClientExploreCmd", T.pack "ClientExploreDone"]
+    -- fault traces need a closable transport (covered by
+    -- testPrematureCloseTcp); explorer sessions are covered by
+    -- ExploreMirrorSpec
+    if T.pack "ClientCloseConn" `elem` acts || any (`elem` exploreActs) acts
+      then pure ()
+      else if T.pack "MirrorSendRegisterError" `elem` acts
+        then driveRegisterErrorScenario f
+        else checkTraceAgainstMirror hcTracePaths trace
+
+-- | The register_error witness: a registration the mirror must reject.
+-- Driven deterministically with a nonexistent trace path.
+driveRegisterErrorScenario :: String -> IO ()
+driveRegisterErrorScenario fname = do
+  (clientEnd, mirrorEnd) <- newMockTransport
+  _ <- forkIO $ (run mirrorEnd >> pure ())
+        `catch` (\(_ :: SomeException) -> pure ())
+  sendMsg clientEnd (RegisterTraces hcApalacheCfg ["/nonexistent/trace.itf.json"])
+  msg <- recvMsg clientEnd
+  case msg of
+    Right (RegisterError _) -> pure ()
+    other -> assertFailure (fname ++ ": expected register_error, got " ++ showMsg other)
+
+wrongState :: Map.Map Text Value
+wrongState = Map.singleton (T.pack "hr") (VInt 999)
+
+-- -----------------------------------------------------------------------------
+-- MBT over real transports (item: transport coverage)
+--
+-- The mock-based MBT test compares mirror-internal step traces; over real
+-- transports only client-visible behavior is compared (message flow and
+-- final result), driven by the same model traces and the same
+-- report_matches guidance. Gated behind the MBT_TRANSPORTS env var
+-- (comma-separated subset of "stdio,tcp,tls"); with no env var the test
+-- is a no-op.
+-- -----------------------------------------------------------------------------
+
+newtype Runner = Runner { withRunner :: forall a. (forall t. Transport t => t -> IO a) -> IO a }
+
+-- | Client side of a spawned mirror process speaking stdio.
+data ProcTransport = ProcTransport Handle Handle
+
+instance Transport ProcTransport where
+  send (ProcTransport hin _) bs = B8.hPutStrLn hin bs >> hFlush hin
+  recv (ProcTransport _ hout) = do
+    r <- try (B8.hGetLine hout) :: IO (Either IOException B8.ByteString)
+    pure (either (const B8.empty) id r)
+
+stdioRunner :: FilePath -> Runner
+stdioRunner bin = Runner $ \k -> do
+  (Just hin, Just hout, _, ph) <- createProcess (proc bin [])
+    { std_in = CreatePipe, std_out = CreatePipe }
+  r <- k (ProcTransport hin hout)
+  terminateProcess ph
+  _ <- waitForProcess ph
+  pure r
+
+tcpRunner :: Runner
+tcpRunner = Runner $ \k -> do
+  port <- freePort'
+  tid <- forkIO (serveTcp port)
+  threadDelay 200000
+  s <- connectLoop 20 port
+  t <- tcpTransport s
+  r <- k t
+  close s
+  killThread tid
+  pure r
+
+tlsRunner :: Certs -> Runner
+tlsRunner certs = Runner $ \k -> do
+  port <- freePort'
+  serverParams <- mkServerParams (serverCrt certs) (serverKey certs) (caCrt certs)
+  tid <- forkIO (serveTlsConcurrent 2 serverParams port)
+  threadDelay 200000
+  clientParams <- mkClientParams "127.0.0.1" (clientCrt certs) (clientKey certs) (caCrt certs)
+  t <- connectTls clientParams "127.0.0.1" port
+  r <- k t
+  killThread tid
+  pure r
+
+freePort' :: IO PortNumber
+freePort' = do
+  addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) (Just "127.0.0.1") (Just "0")
+  case addrs of
+    [] -> error "freePort': cannot resolve 127.0.0.1"
+    (addr : _) -> do
+      s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+      bind s (addrAddress addr)
+      SockAddrInet p _ <- getSocketName s
+      close s
+      pure p
+
+connectLoop :: Int -> PortNumber -> IO Socket
+connectLoop retries port = do
+  addrs <- getAddrInfo (Just defaultHints) (Just "127.0.0.1") (Just (show port))
+  case addrs of
+    [] -> error "connectLoop: cannot resolve 127.0.0.1"
+    (addr : _) -> do
+      s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+      r <- try (connect s (addrAddress addr))
+      case r of
+        Right () -> pure s
+        Left (_ :: IOException)
+          | retries > 0 -> close s >> threadDelay 100000 >> connectLoop (retries - 1) port
+          | otherwise   -> close s >> error "connectLoop: connection refused"
+
+mirrorBin :: IO FilePath
+mirrorBin = do
+  mEnv <- lookupEnv "MODELMIRRORS_BIN"
+  case mEnv of
+    Just b -> pure b
+    Nothing -> do
+      out <- readProcess "cabal" ["list-bin", "ModelMirrors"] ""
+      case lines out of
+        (b : _) -> pure b
+        [] -> error "mirrorBin: cabal list-bin returned empty output"
+
+testMbtTransports :: TestTree
+testMbtTransports = testCase "mbt over stdio/tcp/tls (MBT_TRANSPORTS)" $ do
+  mEnv <- lookupEnv "MBT_TRANSPORTS"
+  let enabled = maybe [] (T.splitOn (T.pack ",") . T.pack) mEnv
+  if null enabled
+    then pure ()
+    else do
+      genResult <- generateTraceFiles hcApalacheCfg hcTraceConfig
+      hcTracePaths <- case genResult of
+        Right (_, ps) -> pure (take 1 ps)
+        Left err -> assertFailure $ "pre-generate traces error: " ++ show err
+      traces <- generateMirrorTraces
+      let applicable = filter (\t ->
+            let acts = map actionTake (traceStates t)
+            in not (any (`elem` [T.pack "ClientRegisterGenTraces"
+                                ,T.pack "ClientRegisterExplore"
+                                ,T.pack "ClientRegisterExploreSession"
+                                ,T.pack "ClientRecvRegisterError"
+                                ,T.pack "MirrorSendRegisterError"
+                                ]) acts)
+            ) traces
+      assertBool "at least one applicable trace" (not (null applicable))
+      certs <- genCerts
+      bin <- mirrorBin
+      let runners :: [(Text, Runner)]
+          runners = concat
+            [ [("stdio", stdioRunner bin) | T.pack "stdio" `elem` enabled]
+            , [("tcp", tcpRunner) | T.pack "tcp" `elem` enabled]
+            , [("tls", tlsRunner certs) | T.pack "tls" `elem` enabled]
+            ]
+      forM_ runners $ \(tname, runner) ->
+        forM_ (zip [1 :: Int ..] applicable) $ \(n, trace) -> do
+          let steps = drop 1 (traceStates trace)
+              reportBits = [ b | s <- steps
+                               , actionTake s == T.pack "ClientReport"
+                               , Just (VBool b) <- [Map.lookup (T.pack "report_matches") (stateVars s)]
+                               ]
+              anyMismatch = False `elem` reportBits
+          withRunner runner $ \c -> do
+            client <- hourClockClient c
+            bitsRef <- newIORef reportBits
+            let guidedClient = client
+                  { clientHandler = \action prevState -> do
+                      bits <- readIORef bitsRef
+                      let (matches, rest) = case bits of
+                            [] -> (True, [])
+                            (b : bs) -> (b, bs)
+                      writeIORef bitsRef rest
+                      if matches
+                        then clientHandler client action prevState
+                        else pure wrongState
+                  }
+            clientResult <- runClientWithTraces guidedClient hcApalacheCfg hcTracePaths
+            case (anyMismatch, clientResult) of
+              (False, Right ()) -> pure ()
+              (True, Left _) -> pure ()
+              (False, Left e) -> assertFailure (T.unpack tname ++ " trace " ++ show n ++ ": client failed on all-match trace: " ++ T.unpack e)
+              (True, Right ()) -> assertFailure (T.unpack tname ++ " trace " ++ show n ++ ": client succeeded on a mismatch trace")
 
 generateMirrorTrace :: IO ItfTrace
 generateMirrorTrace = do
@@ -567,6 +872,70 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
 
 dummyState :: Map.Map Text Value
 dummyState = Map.singleton (T.pack "dummy") (VInt 0)
+
+-- -----------------------------------------------------------------------------
+-- Fault injection (impl side): out-of-order, garbage, and premature-close
+-- inputs must yield protocol_error / clean disconnect, never a hang.
+-- Model side lives in specs/MirrorProtocolFaults.tla.
+-- -----------------------------------------------------------------------------
+
+testOutOfOrderFirstMessage :: TestTree
+testOutOfOrderFirstMessage = testCase "out-of-order first message gets protocol_error" $ do
+  (clientEnd, mirrorEnd) <- newMockTransport
+  done <- newEmptyMVar
+  _ <- forkIO $ run mirrorEnd
+        >> putMVar done True
+        `catch` (\(_ :: SomeException) -> putMVar done False)
+  sendMsg clientEnd (ReportState dummyState)
+  msg <- recvMsg clientEnd
+  case msg of
+    Right (ProtocolError _) -> pure ()
+    other -> assertFailure ("expected protocol_error, got " ++ showMsg other)
+
+testGarbageMidSession :: TestTree
+testGarbageMidSession = testCase "garbage mid-session gets protocol_error" $ do
+  genResult <- generateTraceFiles hcApalacheCfg hcTraceConfig
+  hcTracePaths <- case genResult of
+    Right (_, ps) -> pure (take 1 ps)
+    Left err -> assertFailure $ "pre-generate traces error: " ++ show err
+  (clientEnd, mirrorEnd) <- newMockTransport
+  _ <- forkIO $ (runMirrorWithTraces mirrorEnd hcApalacheCfg hcTracePaths >> pure ())
+        `catch` (\(_ :: SomeException) -> pure ())
+  _ <- recvOrDie' "SpecValidated" clientEnd :: IO (Either String MirrorMessage)
+  _ <- recvOrDie' "InitialState" clientEnd :: IO (Either String MirrorMessage)
+  send clientEnd (B8.pack "garbage")
+  msg <- recvMsg clientEnd
+  case msg of
+    Right (ProtocolError _) -> pure ()
+    other -> assertFailure ("expected protocol_error, got " ++ showMsg other)
+
+testPrematureCloseTcp :: TestTree
+testPrematureCloseTcp = testCase "premature close ends the session; server keeps accepting" $ do
+  genResult <- generateTraceFiles hcApalacheCfg hcTraceConfig
+  hcTracePaths <- case genResult of
+    Right (_, ps) -> pure (take 1 ps)
+    Left err -> assertFailure $ "pre-generate traces error: " ++ show err
+  port <- freePort'
+  tid <- forkIO (serveTcp port)
+  threadDelay 200000
+  -- first client: register, then vanish mid-session
+  s1 <- connectLoop 20 port
+  t1 <- tcpTransport s1
+  sendMsg t1 (RegisterTraces hcApalacheCfg hcTracePaths)
+  _ <- recvOrDie' "SpecValidated" t1 :: IO (Either String MirrorMessage)
+  tcpClose t1
+  threadDelay 300000
+  -- second client: proves the first session ended and the accept loop
+  -- survived the dropped connection
+  s2 <- connectLoop 20 port
+  t2 <- tcpTransport s2
+  send t2 (B8.pack "garbage")
+  msg <- recvMsg t2
+  case msg of
+    Right (ProtocolError _) -> pure ()
+    other -> assertFailure ("expected protocol_error, got " ++ showMsg other)
+  tcpClose t2
+  killThread tid
 
 recvOrDie' :: (Transport t, FromJSON a) => String -> t -> IO (Either String a)
 recvOrDie' desc t = do

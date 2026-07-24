@@ -7,4 +7,5 @@ NoAllStepsDone    == action_taken /= "ClientRecvAllStepsDone"
 NoStepMismatch    == action_taken /= "ClientRecvStepMismatch"
 NoRegisterError   == action_taken /= "ClientRecvRegisterError"
 NoExploreCmdRound == ~(action_taken = "ClientRecvExploreResult")
+NoExploreSessionDone == action_taken /= "ClientRecvExploreDoneAck"
 ==============================================================

@@ -1,0 +1,38 @@
+name: witness-traces
+
+on:
+  push:
+  pull_request:
+
+# Regenerate the checked-in witness traces from MirrorProtocolWitness.tla
+# and fail if they differ from the committed copies, then run the test
+# suite (which replays specs/traces/*.itf.json as fixed scenarios).
+jobs:
+  witness-traces:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install apalache-mc
+        run: |
+          curl -sL https://github.com/apalache-mc/apalache/releases/download/v0.57.0/apalache-v0.57.0.zip -o /tmp/apalache.zip
+          unzip -q /tmp/apalache.zip -d /opt
+          echo "/opt/apalache/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Haskell
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: "9.14.1"
+          cabal-version: "3.16"
+
+      - name: Regenerate witness traces
+        run: scripts/gen-witness-traces.sh
+
+      - name: Verify checked-in traces are up to date
+        run: git diff --exit-code specs/traces/
+
+      - name: Build
+        run: cabal build all
+
+      - name: Test
+        run: cabal test all

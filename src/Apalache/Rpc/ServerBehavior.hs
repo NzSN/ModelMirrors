@@ -36,7 +36,6 @@ import Apalache.Rpc.Types
   , InvariantStatus (..)
   , NextStateParams (..)
   , NextStateResult (..)
-  , RpcClient
   , RpcError (..)
   , SpecParams (..)
   , TransitionStatus (..)

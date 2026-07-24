@@ -60,7 +60,7 @@ import Apalache.Types
     , Value (..)
     , applyParamVars
     )
-import Control.Exception (bracket)
+import Control.Exception (bracket, try, IOException)
 import Control.Monad (forM_)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -212,21 +212,29 @@ instance Transport t => Step (MkRunMirror t) where
 
 instance Transport t => Step (MkRunMirrorWithTraces t) where
   exec (MkRunMirrorWithTraces transport cfg tracePaths) = do
-    expanded <- concat <$> mapM expandPath tracePaths
-    traces <- mapM readTrace expanded
-    case sequence traces of
-      Left err -> do
-        sendMsg transport (RegisterError (T.pack err))
-        pure [MirrorSendRegisterError (T.pack err)]
-      Right parsed -> do
-        let pvs = filter (not . T.null) [paramVarNames cfg]
-            traces' = map (applyParamVars pvs) parsed
-        sendMsg transport (SpecValidated SpecValid)
-        let driver = makeTransportDriver transport
-        stepResults <- exec (MkReplayAll transport driver traces')
-        sendMsg transport AllStepsDone
-        pure (stepResults ++ [MirrorSendAllStepsDone])
+    r <- try go
+    case r of
+      Left (e :: IOException) -> do
+        -- unreadable trace file(s): report, don't die
+        sendMsg transport (RegisterError (T.pack (show e)))
+        pure [MirrorSendRegisterError (T.pack (show e))]
+      Right steps -> pure steps
     where
+      go = do
+        expanded <- concat <$> mapM expandPath tracePaths
+        traces <- mapM readTrace expanded
+        case sequence traces of
+          Left err -> do
+            sendMsg transport (RegisterError (T.pack err))
+            pure [MirrorSendRegisterError (T.pack err)]
+          Right parsed -> do
+            let pvs = filter (not . T.null) [paramVarNames cfg]
+                traces' = map (applyParamVars pvs) parsed
+            sendMsg transport (SpecValidated SpecValid)
+            let driver = makeTransportDriver transport
+            stepResults <- exec (MkReplayAll transport driver traces')
+            sendMsg transport AllStepsDone
+            pure (stepResults ++ [MirrorSendAllStepsDone])
       expandPath p = do
         isDir <- doesDirectoryExist p
         if isDir then findTraceFiles p else pure [p]

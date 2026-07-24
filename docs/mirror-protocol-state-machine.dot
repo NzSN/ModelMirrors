@@ -1,0 +1,63 @@
+// State machine of specs/MirrorProtocol.tla
+// Render: dot -Tsvg docs/mirror-protocol-state-machine.dot -o docs/mirror-protocol-state-machine.svg
+digraph MirrorProtocol {
+  rankdir=TB
+  node [shape=box, style="rounded,filled", fillcolor=grey95, fontname="monospace", fontsize=10]
+  edge [fontname="monospace", fontsize=8]
+  label="MirrorProtocol.tla — client and mirror phase machines (edges labeled with TLA+ actions)"
+  labelloc=t
+  fontsize=12
+
+  subgraph cluster_client {
+    label="client (cp)"
+    color=steelblue
+    c_idle             [label="idle", fillcolor=lightblue]
+    c_wait_validation  [label="waiting_validation"]
+    c_wait_gen         [label="waiting_gen"]
+    c_wait_init        [label="waiting_init"]
+    c_wait_action      [label="waiting_action"]
+    c_wait_ack         [label="waiting_ack"]
+    c_exploring        [label="exploring"]
+    c_wait_done        [label="waiting_done"]
+    c_done             [label="done", fillcolor=palegreen]
+
+    c_idle -> c_wait_validation [label="ClientRegister /\nClientRegisterTraces /\nClientRegisterExplore /\nClientRegisterExploreSession"]
+    c_idle -> c_wait_gen        [label="ClientRegisterGenTraces"]
+    c_wait_validation -> c_wait_init   [label="ClientRecvSpecValidated"]
+    c_wait_validation -> c_done        [label="ClientRecvRegisterError"]
+    c_wait_validation -> c_exploring   [label="ClientRecvExplorerReady"]
+    c_wait_gen -> c_idle               [label="ClientRecvGenTracesDone"]
+    c_wait_init -> c_wait_action       [label="ClientRecvInitialState"]
+    c_wait_action -> c_wait_ack        [label="ClientReport"]
+    c_wait_ack -> c_wait_action        [label="ClientRecvNextStep"]
+    c_wait_ack -> c_wait_ack           [label="ClientRecvStepOk"]
+    c_wait_ack -> c_done               [label="ClientRecvAllStepsDone /\nClientRecvStepMismatch"]
+    c_exploring -> c_exploring         [label="ClientExploreCmd /\nClientRecvExploreResult"]
+    c_exploring -> c_wait_done         [label="ClientExploreDone"]
+    c_wait_done -> c_done              [label="ClientRecvExploreDoneAck"]
+  }
+
+  subgraph cluster_mirror {
+    label="mirror (mp)"
+    color=darkorange
+    m_idle        [label="idle", fillcolor=lightblue]
+    m_validating  [label="validating"]
+    m_generating  [label="generating"]
+    m_ready       [label="ready"]
+    m_stepping    [label="stepping"]
+    m_exploring   [label="exploring"]
+    m_done        [label="done", fillcolor=palegreen]
+
+    m_idle -> m_validating  [label="MirrorRecvRegister /\nMirrorRecvRegisterExplore /\nMirrorRecvRegisterExploreSession"]
+    m_idle -> m_ready       [label="MirrorRecvRegisterTraces\n(sends SPEC_VALIDATED)"]
+    m_idle -> m_generating  [label="MirrorRecvRegisterGenTraces"]
+    m_validating -> m_ready     [label="MirrorSendSpecValidatedValid"]
+    m_validating -> m_done      [label="MirrorSendRegisterError"]
+    m_validating -> m_exploring [label="MirrorSendExplorerReady"]
+    m_generating -> m_idle      [label="MirrorSendGenTracesDone"]
+    m_ready -> m_stepping       [label="MirrorSendInitialState"]
+    m_stepping -> m_stepping    [label="MirrorRecvReportOk /\nMirrorSendNextStep"]
+    m_stepping -> m_done        [label="MirrorRecvReportAllDone /\nMirrorRecvReportMismatch"]
+    m_exploring -> m_done       [label="MirrorRecvExploreDone"]
+  }
+}
