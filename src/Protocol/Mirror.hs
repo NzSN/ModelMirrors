@@ -62,6 +62,8 @@ import Apalache.Types
     )
 import Control.Exception (bracket, try, IOException)
 import Control.Monad (forM_)
+import qualified Data.Aeson as A
+import qualified Data.ByteString.Lazy as LBS
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -255,8 +257,23 @@ instance Transport t => Step (MkRunMirrorGenTraces t) where
                 forM_ paths $ \p -> copyFile p (d </> takeFileName p)
                 pure $ map (\p -> d </> takeFileName p) paths
               _ -> pure paths
-            sendMsg transport (GenTracesDone finalPaths)
-            pure [MirrorSendGenTracesDone finalPaths]
+            contentsRes <- readTraceContents finalPaths
+            case contentsRes of
+              Left err -> do
+                sendMsg transport (RegisterError err)
+                pure [MirrorSendRegisterError err]
+              Right contents -> do
+                sendMsg transport (GenTracesDone finalPaths contents)
+                pure [MirrorSendGenTracesDone finalPaths]
+
+readTraceContents :: [FilePath] -> IO (Either Text [A.Value])
+readTraceContents ps = fmap sequence (traverse readOne ps)
+  where
+    readOne p = do
+      bs <- LBS.readFile p
+      pure $ case A.decode bs of
+        Just v  -> Right v
+        Nothing -> Left (T.pack ("failed to parse generated trace: " ++ p))
 
 instance Transport t => Step (MkExploreMirror t) where
   exec (MkExploreMirror transport spec invs exports maxSteps) =

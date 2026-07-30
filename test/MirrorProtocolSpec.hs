@@ -143,8 +143,9 @@ testRunMirrorGenTraces = testCase "runMirrorGenTraces generates and notifies don
 
   msg <- recvMsg clientEnd
   paths <- case msg of
-    Right (GenTracesDone ps) -> do
+    Right (GenTracesDone ps ts) -> do
       assertBool "GenTracesDone has at least one path" (not (null ps))
+      assertBool "GenTracesDone inlines one trace per path" (length ts == length ps)
       pure ps
     _ -> assertFailure $ "expected GenTracesDone, got: " ++ showMsg msg
 
@@ -167,9 +168,10 @@ testRunMirrorGenTracesWithDest = testCase "runMirrorGenTraces copies to destPath
 
   msg <- recvMsg clientEnd
   _ <- case msg of
-    Right (GenTracesDone ps) -> do
+    Right (GenTracesDone ps ts) -> do
       assertBool "GenTracesDone has at least one path" (not (null ps))
       assertBool "all paths point to destDir" (all (destDir `isPrefixOf`) ps)
+      assertBool "GenTracesDone inlines one trace per path" (length ts == length ps)
       pure ps
     _ -> assertFailure $ "expected GenTracesDone, got: " ++ showMsg msg
 
@@ -236,7 +238,7 @@ testRunMirrorGenThenReplay = testCase "runMirrorGenTraces then RegisterTraces re
 
   msg <- recvMsg clientEnd1
   generatedPaths <- case msg of
-    Right (GenTracesDone ps) ->
+    Right (GenTracesDone ps _) ->
       assertBool "GenTracesDone has paths" (not (null ps)) >> pure ps
     _ -> assertFailure $ "expected GenTracesDone, got: " ++ showMsg msg
 
@@ -786,7 +788,7 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
         "ClientRecvGenTracesDone" -> do
           msg <- recvOrDie "GenTracesDone"
           let ok = case msg of
-                Right (GenTracesDone _) -> True
+                Right (GenTracesDone _ _) -> True
                 _ -> False
           pure (i, ("recv GenTracesDone", ok, showMsg msg))
         "ClientReport" -> do
@@ -851,7 +853,7 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
         "MirrorSendGenTracesDone" -> do
           msg <- recvOrDie "GenTracesDone"
           let ok = case msg of
-                Right (GenTracesDone _) -> True
+                Right (GenTracesDone _ _) -> True
                 _ -> False
           pure (i, ("recv GenTracesDone", ok, showMsg msg))
         "ClientRecvRegisterError" ->

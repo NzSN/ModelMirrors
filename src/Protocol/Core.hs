@@ -15,6 +15,7 @@ module Protocol.Core
   , MaxSteps
   , TransitionCount
   , InvariantCount
+  , TraceContent
   , DiffHint (..)
   , PathSeg (..)
   , Path
@@ -25,6 +26,7 @@ module Protocol.Core
 
 import Apalache.Rpc.Types (ApalacheSpec)
 import Apalache.Types (ApalacheConfig, TraceGenerationConfig, ValidateResult, Value)
+import qualified Data.Aeson as A
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Engine.Types
@@ -49,6 +51,7 @@ type StepNo = Int
 type MaxSteps = Int
 type TransitionCount = Int
 type InvariantCount = Int
+type TraceContent = A.Value
 
 data ClientMessage
   = Register !ApalacheConfig !TraceGenerationConfig !(Maybe ApalacheSpec)
@@ -73,7 +76,7 @@ data MirrorMessage
   | StepOk
   | StepMismatch !StateValuation !StateValuation ![DiffHint]
   | AllStepsDone
-  | GenTracesDone ![FilePath]
+  | GenTracesDone ![FilePath] ![TraceContent]
   | RegisterError !ErrorMessage
   | ProtocolError !ErrorMessage
   | ExplorerReady !TransitionCount !TransitionCount !InvariantCount

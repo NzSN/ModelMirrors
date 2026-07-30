@@ -61,7 +61,7 @@ runClientGenTracesWithSpec client apCfg tc destPath mSpec = do
   sendMsg (clientTransport client) (RegisterGenTraces apCfg tc destPath mSpec)
   recvMsg (clientTransport client) >>= \case
     Left err                               -> pure (Left (T.pack err))
-    Right (GenTracesDone _)                -> pure (Right ())
+    Right (GenTracesDone _ _)             -> pure (Right ())
     Right (RegisterError e)                -> pure (Left e)
     Right (ProtocolError e)                -> pure (Left e)
     Right _                                -> pure (Left (T.pack "Unexpected message: expected GenTracesDone"))

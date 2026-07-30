@@ -142,9 +142,10 @@ instance ToJSON MirrorMessage where
   toJSON AllStepsDone = object
     [ fromString "proto_step" .= T.pack "all_steps_done"
     ]
-  toJSON (GenTracesDone paths) = object
+  toJSON (GenTracesDone paths traces) = object
     [ fromString "proto_step" .= T.pack "gen_traces_done"
     , fromString "itfTracePaths" .= paths
+    , fromString "itfTraces" .= traces
     ]
   toJSON (RegisterError err) = object
     [ fromString "proto_step" .= T.pack "register_error"
@@ -207,6 +208,7 @@ instance FromJSON MirrorMessage where
           pure AllStepsDone
       t | t == T.pack "gen_traces_done" ->
           GenTracesDone <$> o .: fromString "itfTracePaths"
+                        <*> o .:? fromString "itfTraces" .!= []
       t | t == T.pack "protocol_error" ->
           ProtocolError <$> o .: fromString "error"
       t | t == T.pack "register_error" ->
