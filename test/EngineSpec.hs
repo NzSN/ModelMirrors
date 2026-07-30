@@ -3,7 +3,7 @@ module EngineSpec (spec) where
 import Apalache.Types (ItfTrace (..), TraceState (..), Value (..))
 import Engine.Core (traceSteps, diffState)
 import Engine.Replay (EngineM (..), StateDriver (..))
-import Engine.Types (Step (..), StepCommand (..), StateDiff (..), VarDiff (..))
+import Engine.Types (DiffHint (..), PathSeg (..), Step (..), StepCommand (..), StateDiff (..))
 
 import qualified Data.Aeson as A
 import qualified Data.ByteString.Lazy.Char8 as LBS8
@@ -84,20 +84,20 @@ testDiffValueMismatch = testCase "diffState value mismatch" $ do
   let expected = Map.singleton (T.pack "x") (VInt 1)
       actual   = Map.singleton (T.pack "x") (VInt 2)
   diffState expected actual @?=
-    StateMismatch expected actual [ValueMismatch (T.pack "x") (VInt 1) (VInt 2)]
+    StateMismatch expected actual [HValueMismatch [Field (T.pack "x")] (VInt 1) (VInt 2)]
 
 testDiffMissingVar :: TestTree
 testDiffMissingVar = testCase "diffState missing variable" $ do
   let expected = Map.singleton (T.pack "x") (VInt 1)
   diffState expected Map.empty @?=
-    StateMismatch expected Map.empty [MissingVar (T.pack "x") (VInt 1)]
+    StateMismatch expected Map.empty [HMissing [Field (T.pack "x")] (VInt 1)]
 
 testDiffExtraVar :: TestTree
 testDiffExtraVar = testCase "diffState extra variable" $ do
   let s = VStr (T.pack "bonus")
       actual = Map.singleton (T.pack "y") s
   diffState Map.empty actual @?=
-    StateMismatch Map.empty actual [ExtraVar (T.pack "y") s]
+    StateMismatch Map.empty actual [HExtra [Field (T.pack "y")] s]
 
 testDiffMixed :: TestTree
 testDiffMixed = testCase "diffState mixed differences" $ do

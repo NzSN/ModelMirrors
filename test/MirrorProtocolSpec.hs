@@ -218,7 +218,7 @@ testRunMirrorClientReport = testCase "ClientReport must send ReportState or time
   msg3 <- recvOrDie' "step result" clientEnd
   case msg3 of
     Right StepOk -> pure ()
-    Right (StepMismatch _ _) -> pure ()
+    Right (StepMismatch _ _ _) -> pure ()
     _ -> assertFailure $ "expected StepOk/StepMismatch, got: " ++ showMsg msg3
 
   sendMsg clientEnd $ ReportState dummyState
@@ -809,7 +809,7 @@ driveMirror clientEnd apCfg tc tracePaths steps = go 0 steps
           msg <- recvOrDie "step result"
           let ok = case msg of
                 Right StepOk             -> True
-                Right (StepMismatch _ _) -> True
+                Right (StepMismatch _ _ _) -> True
                 Right AllStepsDone       -> True
                 _                        -> False
           pure (i, ("recv step result", ok, showMsg msg))

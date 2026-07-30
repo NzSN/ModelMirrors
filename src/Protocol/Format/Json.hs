@@ -8,6 +8,7 @@ import Protocol.Core
 
 import Data.Aeson
 import Data.Aeson.Key (fromString)
+import Data.Aeson.Types (Parser)
 import qualified Data.Text as T
 
 instance ToJSON ClientMessage where
@@ -132,10 +133,11 @@ instance ToJSON MirrorMessage where
   toJSON StepOk = object
     [ fromString "proto_step" .= T.pack "step_ok"
     ]
-  toJSON (StepMismatch expected actual) = object
+  toJSON (StepMismatch expected actual hints) = object
     [ fromString "proto_step" .= T.pack "step_mismatch"
     , fromString "expected" .= expected
     , fromString "actual" .= actual
+    , fromString "hints" .= hints
     ]
   toJSON AllStepsDone = object
     [ fromString "proto_step" .= T.pack "all_steps_done"
@@ -200,6 +202,7 @@ instance FromJSON MirrorMessage where
           pure StepOk
       t | t == T.pack "step_mismatch" ->
           StepMismatch <$> o .: fromString "expected" <*> o .: fromString "actual"
+                       <*> o .:? fromString "hints" .!= []
       t | t == T.pack "all_steps_done" ->
           pure AllStepsDone
       t | t == T.pack "gen_traces_done" ->
@@ -228,3 +231,46 @@ instance FromJSON MirrorMessage where
           pure ExploreSessionDone
       _ ->
           fail $ "Unknown MirrorMessage tag: " ++ T.unpack tag
+
+instance ToJSON PathSeg where
+  toJSON (Field f) = object [ fromString "field" .= f ]
+  toJSON (Index i) = object [ fromString "index" .= i ]
+
+instance FromJSON PathSeg where
+  parseJSON = withObject "PathSeg" $ \o -> do
+    mField <- o .:? fromString "field"
+    case mField of
+      Just f  -> pure (Field f)
+      Nothing -> Index <$> o .: fromString "index"
+
+instance ToJSON DiffHint where
+  toJSON h = case h of
+    HValueMismatch p e a -> base "value_mismatch" p
+      [ fromString "expected" .= e, fromString "actual" .= a ]
+    HMissing p e -> base "missing" p
+      [ fromString "expected" .= e ]
+    HExtra p a -> base "extra" p
+      [ fromString "actual" .= a ]
+    HTypeMismatch p e a -> base "type_mismatch" p
+      [ fromString "expected" .= e, fromString "actual" .= a ]
+    HTruncated p -> base "truncated" p []
+    where
+      base k p fields = object $
+        [ fromString "kind" .= k, fromString "path" .= p ] ++ fields
+
+instance FromJSON DiffHint where
+  parseJSON = withObject "DiffHint" $ \o -> do
+    kind <- o .: fromString "kind" :: Parser T.Text
+    path <- o .: fromString "path"
+    case kind of
+      t | t == T.pack "value_mismatch" ->
+          HValueMismatch path <$> o .: fromString "expected" <*> o .: fromString "actual"
+      t | t == T.pack "missing" ->
+          HMissing path <$> o .: fromString "expected"
+      t | t == T.pack "extra" ->
+          HExtra path <$> o .: fromString "actual"
+      t | t == T.pack "type_mismatch" ->
+          HTypeMismatch path <$> o .: fromString "expected" <*> o .: fromString "actual"
+      t | t == T.pack "truncated" ->
+          pure (HTruncated path)
+      _ -> fail $ "Unknown DiffHint kind: " ++ T.unpack kind

@@ -2,46 +2,87 @@ module Protocol.Core
   ( ClientMessage (..)
   , MirrorMessage (..)
   , ProtocolState (..)
+  , ActionName
+  , ErrorMessage
+  , StatusMessage
+  , StateValuation
+  , InvariantName
+  , ExportName
+  , TransitionId
+  , InvariantId
+  , SnapshotId
+  , StepNo
+  , MaxSteps
+  , TransitionCount
+  , InvariantCount
+  , DiffHint (..)
+  , PathSeg (..)
+  , Path
+  , renderPath
+  , renderDiffHint
+  , renderDiffHints
   ) where
 
 import Apalache.Rpc.Types (ApalacheSpec)
 import Apalache.Types (ApalacheConfig, TraceGenerationConfig, ValidateResult, Value)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
+import Engine.Types
+  ( DiffHint (..)
+  , Path
+  , PathSeg (..)
+  , renderDiffHint
+  , renderDiffHints
+  , renderPath
+  )
+
+type ActionName = Text
+type ErrorMessage = Text
+type StatusMessage = Text
+type StateValuation = Map Text Value
+type InvariantName = Text
+type ExportName = Text
+type TransitionId = Int
+type InvariantId = Int
+type SnapshotId = Int
+type StepNo = Int
+type MaxSteps = Int
+type TransitionCount = Int
+type InvariantCount = Int
 
 data ClientMessage
   = Register !ApalacheConfig !TraceGenerationConfig !(Maybe ApalacheSpec)
   | RegisterTraces !ApalacheConfig ![FilePath]
   | RegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath) !(Maybe ApalacheSpec)
-  | RegisterExplore !ApalacheSpec ![Text] ![Text] !Int
-  | RegisterExploreSession !ApalacheSpec ![Text] ![Text]
-  | ExploreAssumeTransition !Int
+  | RegisterExplore !ApalacheSpec ![InvariantName] ![ExportName] !MaxSteps
+  | RegisterExploreSession !ApalacheSpec ![InvariantName] ![ExportName]
+  | ExploreAssumeTransition !TransitionId
   | ExploreNextStep
   | ExploreQueryState
-  | ExploreCheckInvariant !Int
-  | ExploreAssumeState !(Map Text Value)
-  | ExploreRollback !Int
+  | ExploreCheckInvariant !InvariantId
+  | ExploreAssumeState !StateValuation
+  | ExploreRollback !SnapshotId
   | ExploreDone
-  | ReportState !(Map Text Value)
+  | ReportState !StateValuation
   deriving (Show, Eq)
 
 data MirrorMessage
   = SpecValidated !ValidateResult
-  | InitialState !Text !(Map Text Value)
-  | NextStep !Text !(Map Text Value)
+  | InitialState !ActionName !StateValuation
+  | NextStep !ActionName !StateValuation
   | StepOk
-  | StepMismatch !(Map Text Value) !(Map Text Value)
+  | StepMismatch !StateValuation !StateValuation ![DiffHint]
   | AllStepsDone
   | GenTracesDone ![FilePath]
-  | RegisterError !Text
-  | ProtocolError !Text
-  | ExplorerReady !Int !Int !Int
-  | ExploreTransitionStatus !Text
-  | ExploreStepDone !Int
-  | ExploreState !(Map Text Value)
-  | ExploreInvariantStatus !Text
-  | ExploreAssumeStatus !Text
-  | ExploreRollbackDone !Int
+  | RegisterError !ErrorMessage
+  | ProtocolError !ErrorMessage
+  | ExplorerReady !TransitionCount !TransitionCount !InvariantCount
+  | ExploreTransitionStatus !StatusMessage
+  | ExploreStepDone !StepNo
+  | ExploreState !StateValuation
+  | ExploreInvariantStatus !StatusMessage
+  | ExploreAssumeStatus !StatusMessage
+  | ExploreRollbackDone !SnapshotId
   | ExploreSessionDone
   deriving (Show, Eq)
 

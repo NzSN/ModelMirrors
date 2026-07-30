@@ -19,7 +19,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Protocol.Core (ClientMessage (..), MirrorMessage (..))
+import Protocol.Core (ClientMessage (..), MirrorMessage (..), renderDiffHints)
 import Protocol.Format.Json ()
 import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
 
@@ -104,7 +104,8 @@ handleStep client action prevState = do
   recvMsg (clientTransport client) >>= \case
     Left err         -> pure (Left (T.pack err))
     Right StepOk     -> stepLoop client
-    Right (StepMismatch _ _) -> pure (Left (T.pack "Step mismatch"))
+    Right (StepMismatch _ _ hints) ->
+      pure (Left (T.pack "Step mismatch: " <> renderDiffHints hints))
     Right (ProtocolError e)  -> pure (Left e)
     Right _          -> pure (Left (T.pack "Unexpected message: expected StepOk or StepMismatch"))
 

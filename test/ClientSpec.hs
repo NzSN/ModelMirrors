@@ -88,7 +88,7 @@ testMismatchDetected = testCase "mismatch detected" $ do
   sendMsg mEnd (SpecValidated SpecValid)
   sendMsg mEnd (InitialState (T.pack "Init") Map.empty)
   (_ :: Either String ClientMessage) <- recvMsg mEnd
-  sendMsg mEnd (StepMismatch x0 (Map.singleton (T.pack "x") (VInt 999)))
+  sendMsg mEnd (StepMismatch x0 (Map.singleton (T.pack "x") (VInt 999)) [])
   result <- awaitResult mv
   case result of
     Left _ -> pure ()

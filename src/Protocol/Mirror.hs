@@ -302,8 +302,8 @@ instance Transport t => Step (MkExploreMirror t) where
                 let diff = diffState expected actual
                     recvStep = MirrorRecvReportState stepIdx action
                 case diff of
-                  StateMismatch e a _ -> do
-                    sendMsg transport (StepMismatch e a)
+                  StateMismatch e a hints -> do
+                    sendMsg transport (StepMismatch e a hints)
                     pure [sendStep, recvStep, MirrorSendStepMismatch stepIdx diff]
                   StatesMatch -> do
                     asRes <- exploreAssumeState expl actual
@@ -317,7 +317,7 @@ instance Transport t => Step (MkExploreMirror t) where
                         violated <- invariantViolated expl'
                         if violated
                           then do
-                            sendMsg transport (StepMismatch Map.empty Map.empty)
+                            sendMsg transport (StepMismatch Map.empty Map.empty [])
                             pure [ sendStep, recvStep, MirrorSendStepOk stepIdx
                                  , MirrorSendStepMismatch stepIdx
                                      (StateMismatch Map.empty Map.empty []) ]
@@ -477,8 +477,8 @@ instance Transport t => Step (MkReplayOne t) where
             sendMsg transport StepOk
             restSteps <- go (StateDriver report) rest
             pure (sendStep : recvStep : MirrorSendStepOk sidx : restSteps)
-          StateMismatch expected actualDiffs _ -> do
-            sendMsg transport (StepMismatch expected actualDiffs)
+          StateMismatch expected actualDiffs hints -> do
+            sendMsg transport (StepMismatch expected actualDiffs hints)
             pure (sendStep : recvStep : MirrorSendStepMismatch sidx diff : [])
 
 replaySteps :: Transport t => t -> StateDriver IO -> ItfTrace -> IO [MirrorStep]

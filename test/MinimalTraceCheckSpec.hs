@@ -3,7 +3,7 @@ module MinimalTraceCheckSpec (spec) where
 import Apalache.Types (Value (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
-import Engine.Types (StateDiff (..), VarDiff (..))
+import Engine.Types (DiffHint (..), PathSeg (..), StateDiff (..))
 import MinimalTraceCheck (check, normalize)
 import Protocol.Mirror (MirrorStep (..))
 import Test.Tasty (TestTree, testGroup)
@@ -71,7 +71,7 @@ normalizeCollapseMismatchPair = testCase "normalize collapses RecvReport+StepMis
   @?=
     [ MirrorSendStepMismatch 0 mismatch ]
   where
-    mismatch = StateMismatch Map.empty Map.empty [ValueMismatch (T.pack "x") (VInt 1) (VInt 2)]
+    mismatch = StateMismatch Map.empty Map.empty [HValueMismatch [Field (T.pack "x")] (VInt 1) (VInt 2)]
 
 normalizeMultipleCollapses :: TestTree
 normalizeMultipleCollapses = testCase "normalize collapses multiple pairs" $

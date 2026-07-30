@@ -8,7 +8,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Engine.Core (traceSteps)
 import Engine.Replay (StateDriver (..))
-import Engine.Types (Step (..), StateDiff (..), StepCommand (..), VarDiff (..))
+import Engine.Types (DiffHint (..), PathSeg (..), Step (..), StateDiff (..), StepCommand (..))
 import Protocol.Format.Json ()
 import Protocol.Mirror (MirrorStep (..), replaySteps, run)
 import Protocol.Transport.Core (Transport (..))
@@ -81,7 +81,7 @@ testReplaySingleMismatch = testCase "replaySteps single step mismatch" $ do
           vars = stepVars step
           varsFiltered = Map.filterWithKey (\k _ -> k /= T.pack "action_taken") vars
           expectedDiff = StateMismatch varsFiltered wrong
-            [ValueMismatch (T.pack "x") (VInt 1) (VInt 999)]
+            [HValueMismatch [Field (T.pack "x")] (VInt 1) (VInt 999)]
       steps <- replaySteps mirrorEnd driver trace
       case steps of
         [ MirrorSendInitialState a v
