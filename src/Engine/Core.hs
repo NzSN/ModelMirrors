@@ -88,8 +88,8 @@ diffElems path expected actual = common ++ missing ++ extra
 
 diffSet :: [PathSeg] -> [Value] -> [Value] -> [DiffHint]
 diffSet path expected actual =
-     [ HMissing path e | e <- expected \\ actual ]
-  ++ [ HExtra path a   | a <- actual \\ expected ]
+     [ HMissingElem path e | e <- expected \\ actual ]
+  ++ [ HExtraElem path a   | a <- actual \\ expected ]
 
 sameShape :: Value -> Value -> Bool
 sameShape a b = case (a, b) of

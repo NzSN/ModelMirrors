@@ -5,7 +5,7 @@ haskell_test(
     size = "large",
     srcs = glob(
         ["**/*.hs"],
-        exclude = ["specs/**", "TlsTransportSpec.hs"],
+        exclude = ["specs/**", "TlsTransportSpec.hs", "DiffHintSpec.hs"],
     ),
     ghcopts = ["-Wall", "-XGHC2024"],
     data = glob(["specs/*.tla"]) + [

@@ -251,6 +251,10 @@ instance ToJSON DiffHint where
       [ fromString "expected" .= e ]
     HExtra p a -> base "extra" p
       [ fromString "actual" .= a ]
+    HMissingElem p e -> base "missing_elem" p
+      [ fromString "expected" .= e ]
+    HExtraElem p a -> base "extra_elem" p
+      [ fromString "actual" .= a ]
     HTypeMismatch p e a -> base "type_mismatch" p
       [ fromString "expected" .= e, fromString "actual" .= a ]
     HTruncated p -> base "truncated" p []
@@ -269,6 +273,10 @@ instance FromJSON DiffHint where
           HMissing path <$> o .: fromString "expected"
       t | t == T.pack "extra" ->
           HExtra path <$> o .: fromString "actual"
+      t | t == T.pack "missing_elem" ->
+          HMissingElem path <$> o .: fromString "expected"
+      t | t == T.pack "extra_elem" ->
+          HExtraElem path <$> o .: fromString "actual"
       t | t == T.pack "type_mismatch" ->
           HTypeMismatch path <$> o .: fromString "expected" <*> o .: fromString "actual"
       t | t == T.pack "truncated" ->

@@ -6,6 +6,7 @@ import qualified Apalache.SpecSourceSpec as SpecSourceSpec
 import qualified Apalache.TraceSpec as TraceSpec
 import qualified Apalache.TypesSpec as TypesSpec
 import qualified ClientSpec
+import qualified DiffHintSpec
 import qualified EngineSpec
 import qualified ExploreMirrorSpec
 import qualified MainSpec
@@ -21,6 +22,7 @@ import Test.Tasty (defaultMain, testGroup)
 main :: IO ()
 main = defaultMain $ testGroup "ModelMirrors"
   [ ClientSpec.spec
+  , DiffHintSpec.spec
   , EngineSpec.spec
   , CommandSpec.spec
   , TraceSpec.spec
