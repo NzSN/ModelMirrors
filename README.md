@@ -30,6 +30,13 @@ sources — including their `EXTENDS` dependency closure — can travel **inline
 in the registration messages, so a remote mirror needs no filesystem access to
 client files.
 
+## Clients
+
+| Client | Language | Repository |
+| ------ | -------- | ---------- |
+| MirrorRust | Rust | https://github.com/NzSN/MirrorRust |
+| MirrorECMA | TypeScript | https://github.com/NzSN/MirrorECMA |
+
 ```
 +----------------+   JSON-lines (stdio | TCP | mTLS)  +-----------------+
 | Client         | <--------------------------------> | Mirror          |
