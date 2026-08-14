@@ -317,9 +317,9 @@ testProtocolTraceGenerated = testCase "MirrorProtocolServer generates traces" $ 
       let states = traceStates trace
           nvars  = traceVars trace
       assertBool "trace must have at least 2 states" (length states >= 2)
-      assertBool "trace must include mp variable" (T.pack "mp" `elem` nvars)
-      assertBool "trace must include cl_to_mir variable" (T.pack "cl_to_mir" `elem` nvars)
-      assertBool "trace must include mir_to_cl variable" (T.pack "mir_to_cl" `elem` nvars)
+      assertBool "trace must include mirror_phase variable" (T.pack "mirror_phase" `elem` nvars)
+      assertBool "trace must include client_to_mirror variable" (T.pack "client_to_mirror" `elem` nvars)
+      assertBool "trace must include mirror_to_client variable" (T.pack "mirror_to_client" `elem` nvars)
       assertBool "trace must include action_taken variable" (T.pack "action_taken" `elem` nvars)
 
 testMirrorFollowsProtocol :: TestTree
@@ -363,6 +363,7 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
         in not (any (`elem` [T.pack "ClientRegisterGenTraces"
                             ,T.pack "ClientRegisterExplore"
                             ,T.pack "ClientRegisterExploreSession"
+                            ,T.pack "ClientRegisterValidate"
                             ,T.pack "ClientRecvRegisterError"
                             ,T.pack "MirrorSendRegisterError"
                             ]) acts)
@@ -378,7 +379,7 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
 checkTraceAgainstMirror :: [FilePath] -> ItfTrace -> IO ()
 checkTraceAgainstMirror hcTracePaths trace = do
   let steps = drop 1 (traceStates trace)
-      isDone s = case (Map.lookup (T.pack "mp") (stateVars s), Map.lookup (T.pack "cp") (stateVars s)) of
+      isDone s = case (Map.lookup (T.pack "mirror_phase") (stateVars s), Map.lookup (T.pack "client_phase") (stateVars s)) of
         (Just (VStr p1), _) | p1 == T.pack "done" -> True
         (_, Just (VStr p2)) | p2 == T.pack "done" -> True
         _ -> False
@@ -662,6 +663,7 @@ testMbtTransports = testCase "mbt over stdio/tcp/tls (MBT_TRANSPORTS)" $ do
             in not (any (`elem` [T.pack "ClientRegisterGenTraces"
                                 ,T.pack "ClientRegisterExplore"
                                 ,T.pack "ClientRegisterExploreSession"
+                                ,T.pack "ClientRegisterValidate"
                                 ,T.pack "ClientRecvRegisterError"
                                 ,T.pack "MirrorSendRegisterError"
                                 ]) acts)

@@ -7,75 +7,75 @@ EXTENDS MirrorProtocol
 
 \* Lose the queued client → mirror message.
 DropClMsg ==
-  /\ cl_to_mir /= <<>>
-  /\ cl_to_mir' = Tail(cl_to_mir)
+  /\ client_to_mirror /= <<>>
+  /\ client_to_mirror' = Tail(client_to_mirror)
   /\ faulted' = TRUE
   /\ action_taken' = "DropClMsg"
-  /\ UNCHANGED <<mp, cp, mflow, mir_to_cl, report_matches, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, mirror_flow, mirror_to_client, report_matches, client_closed, mirror_closed>>
 
 \* Lose the queued mirror → client message.
 DropMirMsg ==
-  /\ mir_to_cl /= <<>>
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>>
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ faulted' = TRUE
   /\ action_taken' = "DropMirMsg"
-  /\ UNCHANGED <<mp, cp, mflow, cl_to_mir, report_matches, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, mirror_flow, client_to_mirror, report_matches, client_closed, mirror_closed>>
 
 \* Duplicate the queued client → mirror message: the receiver processes a
 \* stale replay (an out-of-order/unexpected message on the impl side).
 DupClMsg ==
-  /\ cl_to_mir /= <<>>
-  /\ cl_to_mir' = cl_to_mir \o <<Head(cl_to_mir)>>
+  /\ client_to_mirror /= <<>>
+  /\ client_to_mirror' = client_to_mirror \o <<Head(client_to_mirror)>>
   /\ faulted' = TRUE
   /\ action_taken' = "DupClMsg"
-  /\ UNCHANGED <<mp, cp, mflow, mir_to_cl, report_matches, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, mirror_flow, mirror_to_client, report_matches, client_closed, mirror_closed>>
 
 \* Duplicate the queued mirror → client message.
 DupMirMsg ==
-  /\ mir_to_cl /= <<>>
-  /\ mir_to_cl' = mir_to_cl \o <<Head(mir_to_cl)>>
+  /\ mirror_to_client /= <<>>
+  /\ mirror_to_client' = mirror_to_client \o <<Head(mirror_to_client)>>
   /\ faulted' = TRUE
   /\ action_taken' = "DupMirMsg"
-  /\ UNCHANGED <<mp, cp, mflow, cl_to_mir, report_matches, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, mirror_flow, client_to_mirror, report_matches, client_closed, mirror_closed>>
 
 \* Client closes the connection mid-session: queued messages are wiped.
 ClientCloseConn ==
-  /\ ~cl_closed
-  /\ cp \in Cs \ {"idle", "done"}
-  /\ cl_closed' = TRUE
-  /\ cl_to_mir' = <<>>
+  /\ ~client_closed
+  /\ client_phase \in Cs \ {"idle", "done"}
+  /\ client_closed' = TRUE
+  /\ client_to_mirror' = <<>>
   /\ faulted' = TRUE
   /\ action_taken' = "ClientCloseConn"
-  /\ UNCHANGED <<mp, cp, mflow, mir_to_cl, report_matches, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, mirror_flow, mirror_to_client, report_matches, mirror_closed>>
 
 \* Mirror closes the connection mid-session.
 MirrorCloseConn ==
-  /\ ~mir_closed
-  /\ mp \in Ms \ {"idle", "done"}
-  /\ mir_closed' = TRUE
-  /\ mir_to_cl' = <<>>
+  /\ ~mirror_closed
+  /\ mirror_phase \in Ms \ {"idle", "done"}
+  /\ mirror_closed' = TRUE
+  /\ mirror_to_client' = <<>>
   /\ faulted' = TRUE
   /\ action_taken' = "MirrorCloseConn"
-  /\ UNCHANGED <<mp, cp, mflow, cl_to_mir, report_matches, cl_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, mirror_flow, client_to_mirror, report_matches, client_closed>>
 
 \* Mirror notices the closed connection and aborts the session.
 MirrorDetectClose ==
-  /\ cl_closed
-  /\ mp \in {"validating", "generating", "ready", "stepping", "exploring"}
-  /\ mp' = "done"
-  /\ mir_to_cl' = <<>>
+  /\ client_closed
+  /\ mirror_phase \in {"validating", "generating", "ready", "stepping", "exploring"}
+  /\ mirror_phase' = "done"
+  /\ mirror_to_client' = <<>>
   /\ faulted' = TRUE
   /\ action_taken' = "MirrorDetectClose"
-  /\ UNCHANGED <<cp, mflow, cl_to_mir, report_matches, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, mirror_flow, client_to_mirror, report_matches, client_closed, mirror_closed>>
 
 \* Client notices the closed connection and aborts the session.
 ClientDetectClose ==
-  /\ mir_closed
-  /\ cp \in Cs \ {"idle", "done"}
-  /\ cp' = "done"
+  /\ mirror_closed
+  /\ client_phase \in Cs \ {"idle", "done"}
+  /\ client_phase' = "done"
   /\ faulted' = TRUE
   /\ action_taken' = "ClientDetectClose"
-  /\ UNCHANGED <<mp, mflow, cl_to_mir, mir_to_cl, report_matches, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, mirror_flow, client_to_mirror, mirror_to_client, report_matches, client_closed, mirror_closed>>
 
 FaultNext ==
   \/ Next
@@ -88,7 +88,7 @@ FaultNext ==
   \/ MirrorDetectClose
   \/ ClientDetectClose
 
-vars == <<mp, cp, action_taken, mflow, cl_to_mir, mir_to_cl, report_matches, faulted, cl_closed, mir_closed>>
+vars == <<mirror_phase, client_phase, action_taken, mirror_flow, client_to_mirror, mirror_to_client, report_matches, faulted, client_closed, mirror_closed>>
 
 FaultSpec == Init /\ [][FaultNext]_vars
 

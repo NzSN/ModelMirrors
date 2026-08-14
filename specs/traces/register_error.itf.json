@@ -2,31 +2,31 @@
   "#meta": {
     "format": "ITF",
     "varTypes": {
-      "mp": "Str",
-      "cl_closed": "Bool",
-      "mir_to_cl": "Seq(Int)",
-      "cp": "Str",
+      "client_phase": "Str",
+      "client_closed": "Bool",
       "action_taken": "Str",
       "faulted": "Bool",
-      "cl_to_mir": "Seq(Int)",
+      "client_to_mirror": "Seq(Int)",
+      "mirror_closed": "Bool",
       "report_matches": "Bool",
-      "mir_closed": "Bool",
-      "mflow": "Str"
+      "mirror_phase": "Str",
+      "mirror_flow": "Str",
+      "mirror_to_client": "Seq(Int)"
     },
     "format-description": "https://apalache-mc.org/docs/adr/015adr-trace.html",
-    "description": "Created by Apalache on Fri Jul 24 12:39:31 CST 2026"
+    "description": "Created by Apalache on Fri Aug 14 17:40:38 CST 2026"
   },
   "vars": [
-    "mp",
-    "cl_closed",
-    "mir_to_cl",
-    "cp",
+    "client_phase",
+    "client_closed",
     "action_taken",
     "faulted",
-    "cl_to_mir",
+    "client_to_mirror",
+    "mirror_closed",
     "report_matches",
-    "mir_closed",
-    "mflow"
+    "mirror_phase",
+    "mirror_flow",
+    "mirror_to_client"
   ],
   "states": [
     {
@@ -34,14 +34,14 @@
         "index": 0
       },
       "action_taken": "init",
-      "cl_closed": false,
-      "cl_to_mir": [],
-      "cp": "idle",
+      "client_closed": false,
+      "client_phase": "idle",
+      "client_to_mirror": [],
       "faulted": false,
-      "mflow": "none",
-      "mir_closed": false,
-      "mir_to_cl": [],
-      "mp": "idle",
+      "mirror_closed": false,
+      "mirror_flow": "none",
+      "mirror_phase": "idle",
+      "mirror_to_client": [],
       "report_matches": false
     },
     {
@@ -49,18 +49,18 @@
         "index": 1
       },
       "action_taken": "ClientRegister",
-      "cl_closed": false,
-      "cl_to_mir": [
+      "client_closed": false,
+      "client_phase": "waiting_validation",
+      "client_to_mirror": [
         {
           "#bigint": "0"
         }
       ],
-      "cp": "waiting_validation",
       "faulted": false,
-      "mflow": "none",
-      "mir_closed": false,
-      "mir_to_cl": [],
-      "mp": "idle",
+      "mirror_closed": false,
+      "mirror_flow": "none",
+      "mirror_phase": "idle",
+      "mirror_to_client": [],
       "report_matches": false
     },
     {
@@ -68,14 +68,14 @@
         "index": 2
       },
       "action_taken": "MirrorRecvRegister",
-      "cl_closed": false,
-      "cl_to_mir": [],
-      "cp": "waiting_validation",
+      "client_closed": false,
+      "client_phase": "waiting_validation",
+      "client_to_mirror": [],
       "faulted": false,
-      "mflow": "traces",
-      "mir_closed": false,
-      "mir_to_cl": [],
-      "mp": "validating",
+      "mirror_closed": false,
+      "mirror_flow": "traces",
+      "mirror_phase": "validating",
+      "mirror_to_client": [],
       "report_matches": false
     },
     {
@@ -83,18 +83,18 @@
         "index": 3
       },
       "action_taken": "MirrorSendRegisterError",
-      "cl_closed": false,
-      "cl_to_mir": [],
-      "cp": "waiting_validation",
+      "client_closed": false,
+      "client_phase": "waiting_validation",
+      "client_to_mirror": [],
       "faulted": false,
-      "mflow": "traces",
-      "mir_closed": false,
-      "mir_to_cl": [
+      "mirror_closed": false,
+      "mirror_flow": "traces",
+      "mirror_phase": "done",
+      "mirror_to_client": [
         {
           "#bigint": "1"
         }
       ],
-      "mp": "done",
       "report_matches": false
     },
     {
@@ -102,14 +102,14 @@
         "index": 4
       },
       "action_taken": "ClientRecvRegisterError",
-      "cl_closed": false,
-      "cl_to_mir": [],
-      "cp": "done",
+      "client_closed": false,
+      "client_phase": "done",
+      "client_to_mirror": [],
       "faulted": false,
-      "mflow": "traces",
-      "mir_closed": false,
-      "mir_to_cl": [],
-      "mp": "done",
+      "mirror_closed": false,
+      "mirror_flow": "traces",
+      "mirror_phase": "done",
+      "mirror_to_client": [],
       "report_matches": false
     }
   ]

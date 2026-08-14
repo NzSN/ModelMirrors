@@ -1,725 +1,329 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg
-   width="1000"
-   height="780"
-   font-family="monospace"
-   version="1.1"
-   id="svg52"
-   sodipodi:docname="mirror-protocol-state-machine.svg"
-   inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
-   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
-   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <sodipodi:namedview
-     id="namedview52"
-     pagecolor="#ffffff"
-     bordercolor="#000000"
-     borderopacity="0.25"
-     inkscape:showpageshadow="2"
-     inkscape:pageopacity="0.0"
-     inkscape:pagecheckerboard="0"
-     inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="1.5501956"
-     inkscape:cx="466.39275"
-     inkscape:cy="437.68669"
-     inkscape:window-width="1920"
-     inkscape:window-height="1057"
-     inkscape:window-x="-8"
-     inkscape:window-y="-8"
-     inkscape:window-maximized="1"
-     inkscape:current-layer="svg52" />
-  <defs
-     id="defs1">
-    <marker
-       id="arr"
-       viewBox="0 0 10 10"
-       refX="9"
-       refY="5"
-       markerWidth="7"
-       markerHeight="7"
-       orient="auto-start-reverse">
-      <path
-         d="M 0 0 L 10 5 L 0 10 z"
-         fill="#333"
-         id="path1" />
-    </marker>
-  </defs>
-  <rect
-     width="1000"
-     height="780"
-     fill="#ffffff"
-     id="rect1"
-     x="44.245613"
-     y="64.771927" />
-  <text
-     x="500.0"
-     y="26"
-     font-size="15"
-     text-anchor="middle"
-     font-weight="bold"
-     id="text1">MirrorProtocol.tla — client and mirror phase machines</text>
-  <rect
-     x="40"
-     y="42"
-     width="440"
-     height="710"
-     rx="12"
-     fill="none"
-     stroke="steelblue"
-     stroke-width="2"
-     id="rect2" />
-  <text
-     x="260"
-     y="58"
-     font-size="12"
-     text-anchor="middle"
-     fill="steelblue"
-     id="text2">client (cp)</text>
-  <rect
-     x="520"
-     y="42"
-     width="440"
-     height="710"
-     rx="12"
-     fill="none"
-     stroke="darkorange"
-     stroke-width="2"
-     id="rect3" />
-  <text
-     x="740"
-     y="58"
-     font-size="12"
-     text-anchor="middle"
-     fill="darkorange"
-     id="text3">mirror (mp)</text>
-  <path
-     d="M 230 87.0 Q 170.0 127.5 160 168.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path3" />
-  <text
-     x="186.5"
-     y="127.5"
-     font-size="9"
-     fill="#333"
-     id="text4">ClientRegister / ClientRegisterTraces /</text>
-  <text
-     x="186.5"
-     y="138.5"
-     font-size="9"
-     fill="#333"
-     id="text5">ClientRegisterExplore / ClientRegisterExploreSession</text>
-  <path
-     d="M 325.0 70 Q 330.0 127.5 295.0 185"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path5" />
-  <text
-     x="329.47369"
-     y="117.00877"
-     font-size="9px"
-     fill="#333333"
-     id="text6">ClientRegisterGenTraces</text>
-  <path
-     d="M 160 202.0 Q 160.0 242.5 160 283.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path6" />
-  <text
-     x="164.0"
-     y="242.5"
-     font-size="9"
-     fill="#333"
-     id="text7">ClientRecvSpecValidated</text>
-  <path
-     d="M 160 202.0 Q 150.0 422.5 230 643.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path7" />
-  <text
-     x="176"
-     y="258"
-     font-size="9"
-     fill="#333"
-     id="text8">ClientRecvRegisterError</text>
-  <path
-     d="M 160 202.0 Q 300.0 300.0 390 398.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path8" />
-  <text
-     x="291.5"
-     y="300.0"
-     font-size="9"
-     fill="#333"
-     id="text9">ClientRecvExplorerReady</text>
-  <path
-     d="M 295.0 185 Q 335.0 127.5 325.0 70"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path9" />
-  <text
-     x="329.92105"
-     y="109.25439"
-     font-size="9px"
-     fill="#333333"
-     id="text10">ClientRecvGenTracesDone</text>
-  <path
-     d="M 160 317.0 Q 160.0 357.5 160 398.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path10" />
-  <text
-     x="164.0"
-     y="357.5"
-     font-size="9"
-     fill="#333"
-     id="text11">ClientRecvInitialState</text>
-  <path
-     d="M 160 432.0 Q 160.0 472.5 160 513.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path11" />
-  <text
-     x="78.07077"
-     y="477.3381"
-     font-size="9px"
-     fill="#333333"
-     id="text12">ClientReport</text>
-  <path
-     d="M 160 513.0 Q 135.0 472.5 160 432.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path12" />
-  <text
-     x="166.79298"
-     y="469.61615"
-     font-size="9px"
-     fill="#333333"
-     id="text13">ClientRecvNextStep</text>
-  <path
-     d="M 255.0 524 a 26 26 0 1 1 -0.1 -14"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path13" />
-  <text
-     x="287.0"
-     y="518"
-     font-size="9"
-     fill="#333"
-     id="text14">ClientRecvStepOk</text>
-  <path
-     d="M 160 547.0 Q 195.0 595.0 230 643.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path14" />
-  <text
-     x="199.0"
-     y="595.0"
-     font-size="9"
-     fill="#333"
-     id="text15">ClientRecvAllStepsDone /</text>
-  <text
-     x="199.0"
-     y="606.0"
-     font-size="9"
-     fill="#333"
-     id="text16">ClientRecvStepMismatch</text>
-  <path
-     d="M 485.0 409 a 26 26 0 1 1 -0.1 -14"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path16" />
-  <text
-     x="517.0"
-     y="403"
-     font-size="9"
-     fill="#333"
-     id="text17">ClientExploreCmd /</text>
-  <text
-     x="517.0"
-     y="414"
-     font-size="9"
-     fill="#333"
-     id="text18">ClientRecvExploreResult</text>
-  <path
-     d="M 390 432.0 Q 390.0 472.5 390 513.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path18" />
-  <text
-     x="394.0"
-     y="472.5"
-     font-size="9"
-     fill="#333"
-     id="text19">ClientExploreDone</text>
-  <path
-     d="M 295.0 530 Q 330.0 595.0 325.0 660"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path19" />
-  <text
-     x="324.0"
-     y="595.0"
-     font-size="9"
-     fill="#333"
-     id="text20">ClientRecvExploreDoneAck</text>
-  <path
-     d="M 700 87.0 Q 645.0 127.5 630 168.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path20" />
-  <text
-     x="659.0"
-     y="127.5"
-     font-size="9"
-     fill="#333"
-     id="text21">MirrorRecvRegister /</text>
-  <text
-     x="659.0"
-     y="138.5"
-     font-size="9"
-     fill="#333"
-     id="text22">MirrorRecvRegisterExplore /</text>
-  <text
-     x="659.0"
-     y="149.5"
-     font-size="9"
-     fill="#333"
-     id="text23">MirrorRecvRegisterExploreSession</text>
-  <path
-     d="M 700 87.0 Q 690.0 185.0 630 283.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path23" />
-  <text
-     x="681.5"
-     y="185.0"
-     font-size="9"
-     fill="#333"
-     id="text24">MirrorRecvRegisterTraces</text>
-  <text
-     x="681.5"
-     y="196.0"
-     font-size="9"
-     fill="#333"
-     id="text25">(+SPEC_VALIDATED)</text>
-  <path
-     d="M 795.0 70 Q 800.0 127.5 765.0 185"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path25" />
-  <text
-     x="798.10529"
-     y="119.28947"
-     font-size="9px"
-     fill="#333333"
-     id="text26">MirrorRecvRegisterGenTraces</text>
-  <path
-     d="M 630 202.0 Q 630.0 242.5 630 283.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path26" />
-  <text
-     x="634.0"
-     y="242.5"
-     font-size="9"
-     fill="#333"
-     id="text27">MirrorSendSpecValidatedValid</text>
-  <path
-     d="M 630 202.0 Q 620.0 422.5 700 643.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path27" />
-  <text
-     x="646"
-     y="258"
-     font-size="9"
-     fill="#333"
-     id="text28">MirrorSendRegisterError</text>
-  <path
-     d="M 630 202.0 Q 775.0 300.0 860 398.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path28" />
-  <text
-     x="764.0"
-     y="300.0"
-     font-size="9"
-     fill="#333"
-     id="text29">MirrorSendExplorerReady</text>
-  <path
-     d="M 765.0 185 Q 805.0 127.5 795.0 70"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path29" />
-  <text
-     x="799.23682"
-     y="108.79825"
-     font-size="9px"
-     fill="#333333"
-     id="text30">MirrorSendGenTracesDone</text>
-  <path
-     d="M 630 317.0 Q 630.0 385.0 630 453.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path30" />
-  <text
-     x="634.0"
-     y="385.0"
-     font-size="9"
-     fill="#333"
-     id="text31">MirrorSendInitialState</text>
-  <path
-     d="M 725.0 464 a 26 26 0 1 1 -0.1 -14"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path31" />
-  <text
-     x="757.0"
-     y="458"
-     font-size="9"
-     fill="#333"
-     id="text32">MirrorRecvReportOk /</text>
-  <text
-     x="757.0"
-     y="469"
-     font-size="9"
-     fill="#333"
-     id="text33">MirrorSendNextStep</text>
-  <path
-     d="M 630 487.0 Q 665.0 565.0 700 643.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path33" />
-  <text
-     x="669.0"
-     y="565.0"
-     font-size="9"
-     fill="#333"
-     id="text34">MirrorRecvReportAllDone /</text>
-  <text
-     x="669.0"
-     y="576.0"
-     font-size="9"
-     fill="#333"
-     id="text35">MirrorRecvReportMismatch</text>
-  <path
-     d="M 860 432.0 Q 805.0 537.5 700 643.0"
-     fill="none"
-     stroke="#333"
-     stroke-width="1.2"
-     marker-end="url(#arr)"
-     id="path35" />
-  <text
-     x="796.5"
-     y="537.5"
-     font-size="9"
-     fill="#333"
-     id="text36">MirrorRecvExploreDone</text>
-  <rect
-     x="135.0"
-     y="53.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#add8e6"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect36" />
-  <text
-     x="230"
-     y="74"
-     font-size="11"
-     text-anchor="middle"
-     id="text37">idle</text>
-  <rect
-     x="65.0"
-     y="168.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect37" />
-  <text
-     x="160"
-     y="189"
-     font-size="11"
-     text-anchor="middle"
-     id="text38">waiting_validation</text>
-  <rect
-     x="295.0"
-     y="168.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect38" />
-  <text
-     x="390"
-     y="189"
-     font-size="11"
-     text-anchor="middle"
-     id="text39">waiting_gen</text>
-  <rect
-     x="65.0"
-     y="283.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect39" />
-  <text
-     x="160"
-     y="304"
-     font-size="11"
-     text-anchor="middle"
-     id="text40">waiting_init</text>
-  <rect
-     x="65.0"
-     y="398.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect40" />
-  <text
-     x="160"
-     y="419"
-     font-size="11"
-     text-anchor="middle"
-     id="text41">waiting_action</text>
-  <rect
-     x="65.0"
-     y="513.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect41" />
-  <text
-     x="160"
-     y="534"
-     font-size="11"
-     text-anchor="middle"
-     id="text42">waiting_ack</text>
-  <rect
-     x="295.0"
-     y="398.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect42" />
-  <text
-     x="390"
-     y="419"
-     font-size="11"
-     text-anchor="middle"
-     id="text43">exploring</text>
-  <rect
-     x="295.0"
-     y="513.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect43" />
-  <text
-     x="390"
-     y="534"
-     font-size="11"
-     text-anchor="middle"
-     id="text44">waiting_done</text>
-  <rect
-     x="135.0"
-     y="643.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#90ee90"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect44" />
-  <text
-     x="230"
-     y="664"
-     font-size="11"
-     text-anchor="middle"
-     id="text45">done</text>
-  <rect
-     x="605.0"
-     y="53.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#add8e6"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect45" />
-  <text
-     x="700"
-     y="74"
-     font-size="11"
-     text-anchor="middle"
-     id="text46">idle</text>
-  <rect
-     x="535.0"
-     y="168.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect46" />
-  <text
-     x="630"
-     y="189"
-     font-size="11"
-     text-anchor="middle"
-     id="text47">validating</text>
-  <rect
-     x="765.0"
-     y="168.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect47" />
-  <text
-     x="860"
-     y="189"
-     font-size="11"
-     text-anchor="middle"
-     id="text48">generating</text>
-  <rect
-     x="535.0"
-     y="283.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect48" />
-  <text
-     x="630"
-     y="304"
-     font-size="11"
-     text-anchor="middle"
-     id="text49">ready</text>
-  <rect
-     x="535.0"
-     y="453.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect49" />
-  <text
-     x="630"
-     y="474"
-     font-size="11"
-     text-anchor="middle"
-     id="text50">stepping</text>
-  <rect
-     x="765.0"
-     y="398.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#f2f2f2"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect50" />
-  <text
-     x="860"
-     y="419"
-     font-size="11"
-     text-anchor="middle"
-     id="text51">exploring</text>
-  <rect
-     x="605.0"
-     y="643.0"
-     width="190"
-     height="34"
-     rx="6"
-     fill="#90ee90"
-     stroke="#333"
-     stroke-width="1.2"
-     id="rect51" />
-  <text
-     x="700"
-     y="664"
-     font-size="11"
-     text-anchor="middle"
-     id="text52">done</text>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+ "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<!-- Generated by graphviz version 2.43.0 (0)
+ -->
+<!-- Title: MirrorProtocol Pages: 1 -->
+<svg width="1037pt" height="640pt"
+ viewBox="0.00 0.00 1037.00 640.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 636)">
+<title>MirrorProtocol</title>
+<polygon fill="white" stroke="transparent" points="-4,4 -4,-636 1033,-636 1033,4 -4,4"/>
+<text text-anchor="middle" x="514.5" y="-618.4" font-family="Times,serif" font-size="12.00">MirrorProtocol.tla — client and mirror phase machines (edges labeled with TLA+ actions)</text>
+<g id="clust1" class="cluster">
+<title>cluster_client</title>
+<polygon fill="none" stroke="steelblue" points="8,-8 8,-603 546,-603 546,-8 8,-8"/>
+<text text-anchor="middle" x="277" y="-589.4" font-family="Times,serif" font-size="12.00">client (client_phase)</text>
+</g>
+<g id="clust2" class="cluster">
+<title>cluster_mirror</title>
+<polygon fill="none" stroke="darkorange" points="554,-98 554,-603 1021,-603 1021,-98 554,-98"/>
+<text text-anchor="middle" x="787.5" y="-589.4" font-family="Times,serif" font-size="12.00">mirror (mirror_phase)</text>
+</g>
+<!-- c_idle -->
+<g id="node1" class="node">
+<title>c_idle</title>
+<path fill="lightblue" stroke="black" d="M260,-574C260,-574 230,-574 230,-574 224,-574 218,-568 218,-562 218,-562 218,-550 218,-550 218,-544 224,-538 230,-538 230,-538 260,-538 260,-538 266,-538 272,-544 272,-550 272,-550 272,-562 272,-562 272,-568 266,-574 260,-574"/>
+<text text-anchor="middle" x="245" y="-553.5" font-family="monospace" font-size="10.00">idle</text>
+</g>
+<!-- c_wait_validation -->
+<g id="node2" class="node">
+<title>c_wait_validation</title>
+<path fill="#f2f2f2" stroke="black" d="M141.5,-466C141.5,-466 40.5,-466 40.5,-466 34.5,-466 28.5,-460 28.5,-454 28.5,-454 28.5,-442 28.5,-442 28.5,-436 34.5,-430 40.5,-430 40.5,-430 141.5,-430 141.5,-430 147.5,-430 153.5,-436 153.5,-442 153.5,-442 153.5,-454 153.5,-454 153.5,-460 147.5,-466 141.5,-466"/>
+<text text-anchor="middle" x="91" y="-445.5" font-family="monospace" font-size="10.00">waiting_validation</text>
+</g>
+<!-- c_idle&#45;&gt;c_wait_validation -->
+<g id="edge1" class="edge">
+<title>c_idle&#45;&gt;c_wait_validation</title>
+<path fill="none" stroke="black" d="M217.69,-554.64C166.26,-553.32 58.11,-547.29 35,-520 24.66,-507.79 27.24,-497.99 35,-484 37.38,-479.71 40.52,-475.88 44.11,-472.47"/>
+<polygon fill="black" stroke="black" points="46.45,-475.09 52,-466.06 42.03,-469.65 46.45,-475.09"/>
+<text text-anchor="middle" x="98.5" y="-513.6" font-family="monospace" font-size="8.00">ClientRegister /</text>
+<text text-anchor="middle" x="98.5" y="-504.6" font-family="monospace" font-size="8.00">ClientRegisterTraces /</text>
+<text text-anchor="middle" x="98.5" y="-495.6" font-family="monospace" font-size="8.00">ClientRegisterExplore /</text>
+<text text-anchor="middle" x="98.5" y="-486.6" font-family="monospace" font-size="8.00">ClientRegisterExploreSession</text>
+</g>
+<!-- c_wait_validate -->
+<g id="node3" class="node">
+<title>c_wait_validate</title>
+<path fill="#f2f2f2" stroke="black" d="M446.5,-412C446.5,-412 357.5,-412 357.5,-412 351.5,-412 345.5,-406 345.5,-400 345.5,-400 345.5,-388 345.5,-388 345.5,-382 351.5,-376 357.5,-376 357.5,-376 446.5,-376 446.5,-376 452.5,-376 458.5,-382 458.5,-388 458.5,-388 458.5,-400 458.5,-400 458.5,-406 452.5,-412 446.5,-412"/>
+<text text-anchor="middle" x="402" y="-391.5" font-family="monospace" font-size="10.00">waiting_validate</text>
+</g>
+<!-- c_idle&#45;&gt;c_wait_validate -->
+<g id="edge3" class="edge">
+<title>c_idle&#45;&gt;c_wait_validate</title>
+<path fill="none" stroke="black" d="M217.89,-547.45C204.27,-542.14 189.01,-533.51 181,-520 172.84,-506.24 172.05,-497.26 181,-484 190.54,-469.87 279.52,-437 341.61,-415.41"/>
+<polygon fill="black" stroke="black" points="343.03,-418.63 351.33,-412.05 340.74,-412.01 343.03,-418.63"/>
+<text text-anchor="middle" x="231" y="-500.1" font-family="monospace" font-size="8.00">ClientRegisterValidate</text>
+</g>
+<!-- c_wait_gen -->
+<g id="node4" class="node">
+<title>c_wait_gen</title>
+<path fill="#f2f2f2" stroke="black" d="M399.5,-466C399.5,-466 340.5,-466 340.5,-466 334.5,-466 328.5,-460 328.5,-454 328.5,-454 328.5,-442 328.5,-442 328.5,-436 334.5,-430 340.5,-430 340.5,-430 399.5,-430 399.5,-430 405.5,-430 411.5,-436 411.5,-442 411.5,-442 411.5,-454 411.5,-454 411.5,-460 405.5,-466 399.5,-466"/>
+<text text-anchor="middle" x="370" y="-445.5" font-family="monospace" font-size="10.00">waiting_gen</text>
+</g>
+<!-- c_idle&#45;&gt;c_wait_gen -->
+<g id="edge2" class="edge">
+<title>c_idle&#45;&gt;c_wait_gen</title>
+<path fill="none" stroke="black" d="M266.81,-537.88C273.03,-532.49 279.59,-526.3 285,-520 297.38,-505.6 294.21,-497.05 308,-484 312.88,-479.38 318.49,-475.13 324.3,-471.32"/>
+<polygon fill="black" stroke="black" points="326.19,-474.27 332.89,-466.06 322.53,-468.3 326.19,-474.27"/>
+<text text-anchor="middle" x="360" y="-500.1" font-family="monospace" font-size="8.00">ClientRegisterGenTraces</text>
+</g>
+<!-- c_wait_init -->
+<g id="node5" class="node">
+<title>c_wait_init</title>
+<path fill="#f2f2f2" stroke="black" d="M92.5,-358C92.5,-358 27.5,-358 27.5,-358 21.5,-358 15.5,-352 15.5,-346 15.5,-346 15.5,-334 15.5,-334 15.5,-328 21.5,-322 27.5,-322 27.5,-322 92.5,-322 92.5,-322 98.5,-322 104.5,-328 104.5,-334 104.5,-334 104.5,-346 104.5,-346 104.5,-352 98.5,-358 92.5,-358"/>
+<text text-anchor="middle" x="60" y="-337.5" font-family="monospace" font-size="10.00">waiting_init</text>
+</g>
+<!-- c_wait_validation&#45;&gt;c_wait_init -->
+<g id="edge4" class="edge">
+<title>c_wait_validation&#45;&gt;c_wait_init</title>
+<path fill="none" stroke="black" d="M62.66,-429.98C56.75,-424.98 51.31,-418.95 48,-412 41.43,-398.19 43.88,-381.37 48.23,-367.57"/>
+<polygon fill="black" stroke="black" points="51.53,-368.73 51.63,-358.14 44.94,-366.36 51.53,-368.73"/>
+<text text-anchor="middle" x="100" y="-392.1" font-family="monospace" font-size="8.00">ClientRecvSpecValidated</text>
+</g>
+<!-- c_exploring -->
+<g id="node8" class="node">
+<title>c_exploring</title>
+<path fill="#f2f2f2" stroke="black" d="M181.5,-358C181.5,-358 134.5,-358 134.5,-358 128.5,-358 122.5,-352 122.5,-346 122.5,-346 122.5,-334 122.5,-334 122.5,-328 128.5,-322 134.5,-322 134.5,-322 181.5,-322 181.5,-322 187.5,-322 193.5,-328 193.5,-334 193.5,-334 193.5,-346 193.5,-346 193.5,-352 187.5,-358 181.5,-358"/>
+<text text-anchor="middle" x="158" y="-337.5" font-family="monospace" font-size="10.00">exploring</text>
+</g>
+<!-- c_wait_validation&#45;&gt;c_exploring -->
+<g id="edge6" class="edge">
+<title>c_wait_validation&#45;&gt;c_exploring</title>
+<path fill="none" stroke="black" d="M133.54,-429.84C140.77,-425.09 147.41,-419.21 152,-412 160.15,-399.2 161.87,-382.35 161.45,-368.28"/>
+<polygon fill="black" stroke="black" points="164.93,-367.93 160.78,-358.18 157.95,-368.39 164.93,-367.93"/>
+<text text-anchor="middle" x="213" y="-392.1" font-family="monospace" font-size="8.00">ClientRecvExplorerReady</text>
+</g>
+<!-- c_done -->
+<g id="node10" class="node">
+<title>c_done</title>
+<path fill="palegreen" stroke="black" d="M306,-52C306,-52 276,-52 276,-52 270,-52 264,-46 264,-40 264,-40 264,-28 264,-28 264,-22 270,-16 276,-16 276,-16 306,-16 306,-16 312,-16 318,-22 318,-28 318,-28 318,-40 318,-40 318,-46 312,-52 306,-52"/>
+<text text-anchor="middle" x="291" y="-31.5" font-family="monospace" font-size="10.00">done</text>
+</g>
+<!-- c_wait_validation&#45;&gt;c_done -->
+<g id="edge5" class="edge">
+<title>c_wait_validation&#45;&gt;c_done</title>
+<path fill="none" stroke="black" d="M153.66,-438.51C196.57,-431.98 249.17,-422.34 269,-412 299.66,-396.01 311.48,-389.82 325,-358 351.17,-296.41 256.05,-276.1 281,-214 281.52,-212.71 349.48,-143.29 350,-142 357.29,-123.85 357.19,-116.19 350,-98 344.09,-83.05 332.78,-69.57 321.63,-58.95"/>
+<polygon fill="black" stroke="black" points="323.77,-56.17 314,-52.08 319.08,-61.37 323.77,-56.17"/>
+<text text-anchor="middle" x="333" y="-230.1" font-family="monospace" font-size="8.00">ClientRecvRegisterError</text>
+</g>
+<!-- c_wait_validate&#45;&gt;c_done -->
+<g id="edge8" class="edge">
+<title>c_wait_validate&#45;&gt;c_done</title>
+<path fill="none" stroke="black" d="M403.31,-375.75C404.8,-354.79 407,-318.32 407,-287 407,-287 407,-287 407,-123 407,-82.62 361.84,-58.37 327.87,-45.84"/>
+<polygon fill="black" stroke="black" points="328.79,-42.46 318.2,-42.47 326.49,-49.07 328.79,-42.46"/>
+<text text-anchor="middle" x="472.5" y="-234.6" font-family="monospace" font-size="8.00">ClientRecvSpecValidatedDone /</text>
+<text text-anchor="middle" x="472.5" y="-225.6" font-family="monospace" font-size="8.00">ClientRecvRegisterError</text>
+</g>
+<!-- c_wait_gen&#45;&gt;c_idle -->
+<g id="edge7" class="edge">
+<title>c_wait_gen&#45;&gt;c_idle</title>
+<path fill="none" stroke="black" d="M397.69,-466.13C403.47,-471.13 408.78,-477.12 412,-484 418.79,-498.49 422.09,-507.58 412,-520 395.96,-539.74 326.29,-548.75 282.16,-552.54"/>
+<polygon fill="black" stroke="black" points="281.77,-549.06 272.08,-553.35 282.33,-556.04 281.77,-549.06"/>
+<text text-anchor="middle" x="470" y="-500.1" font-family="monospace" font-size="8.00">ClientRecvGenTracesDone</text>
+</g>
+<!-- c_wait_action -->
+<g id="node6" class="node">
+<title>c_wait_action</title>
+<path fill="#f2f2f2" stroke="black" d="M105.5,-250C105.5,-250 28.5,-250 28.5,-250 22.5,-250 16.5,-244 16.5,-238 16.5,-238 16.5,-226 16.5,-226 16.5,-220 22.5,-214 28.5,-214 28.5,-214 105.5,-214 105.5,-214 111.5,-214 117.5,-220 117.5,-226 117.5,-226 117.5,-238 117.5,-238 117.5,-244 111.5,-250 105.5,-250"/>
+<text text-anchor="middle" x="67" y="-229.5" font-family="monospace" font-size="10.00">waiting_action</text>
+</g>
+<!-- c_wait_init&#45;&gt;c_wait_action -->
+<g id="edge9" class="edge">
+<title>c_wait_init&#45;&gt;c_wait_action</title>
+<path fill="none" stroke="black" d="M61.12,-321.97C62.22,-305.38 63.9,-279.88 65.19,-260.43"/>
+<polygon fill="black" stroke="black" points="68.69,-260.55 65.85,-250.34 61.7,-260.09 68.69,-260.55"/>
+<text text-anchor="middle" x="114" y="-284.1" font-family="monospace" font-size="8.00">ClientRecvInitialState</text>
+</g>
+<!-- c_wait_ack -->
+<g id="node7" class="node">
+<title>c_wait_ack</title>
+<path fill="#f2f2f2" stroke="black" d="M87.5,-142C87.5,-142 28.5,-142 28.5,-142 22.5,-142 16.5,-136 16.5,-130 16.5,-130 16.5,-118 16.5,-118 16.5,-112 22.5,-106 28.5,-106 28.5,-106 87.5,-106 87.5,-106 93.5,-106 99.5,-112 99.5,-118 99.5,-118 99.5,-130 99.5,-130 99.5,-136 93.5,-142 87.5,-142"/>
+<text text-anchor="middle" x="58" y="-121.5" font-family="monospace" font-size="10.00">waiting_ack</text>
+</g>
+<!-- c_wait_action&#45;&gt;c_wait_ack -->
+<g id="edge10" class="edge">
+<title>c_wait_action&#45;&gt;c_wait_ack</title>
+<path fill="none" stroke="black" d="M46.8,-213.93C42.01,-208.72 37.56,-202.6 35,-196 29.21,-181.08 30.41,-175.33 35,-160 35.91,-156.96 37.17,-153.95 38.65,-151.03"/>
+<polygon fill="black" stroke="black" points="41.82,-152.55 43.9,-142.16 35.79,-148.98 41.82,-152.55"/>
+<text text-anchor="middle" x="62.5" y="-176.1" font-family="monospace" font-size="8.00">ClientReport</text>
+</g>
+<!-- c_wait_ack&#45;&gt;c_wait_action -->
+<g id="edge11" class="edge">
+<title>c_wait_ack&#45;&gt;c_wait_action</title>
+<path fill="none" stroke="black" d="M78.2,-142.07C82.99,-147.28 87.44,-153.4 90,-160 95.79,-174.92 94.59,-180.67 90,-196 89.09,-199.04 87.83,-202.05 86.35,-204.97"/>
+<polygon fill="black" stroke="black" points="83.18,-203.45 81.1,-213.84 89.21,-207.02 83.18,-203.45"/>
+<text text-anchor="middle" x="134" y="-176.1" font-family="monospace" font-size="8.00">ClientRecvNextStep</text>
+</g>
+<!-- c_wait_ack&#45;&gt;c_wait_ack -->
+<g id="edge12" class="edge">
+<title>c_wait_ack&#45;&gt;c_wait_ack</title>
+<path fill="none" stroke="black" d="M99.71,-132.12C109.91,-131.52 117.5,-128.81 117.5,-124 117.5,-120.99 114.53,-118.81 109.82,-117.44"/>
+<polygon fill="black" stroke="black" points="110.12,-113.95 99.71,-115.88 109.05,-120.87 110.12,-113.95"/>
+<text text-anchor="middle" x="154" y="-122.1" font-family="monospace" font-size="8.00">ClientRecvStepOk</text>
+</g>
+<!-- c_wait_ack&#45;&gt;c_done -->
+<g id="edge13" class="edge">
+<title>c_wait_ack&#45;&gt;c_done</title>
+<path fill="none" stroke="black" d="M71.29,-105.76C81.42,-93.84 96.42,-78.64 113,-70 157.8,-46.65 216.35,-38.82 253.82,-36.23"/>
+<polygon fill="black" stroke="black" points="254.03,-39.72 263.81,-35.63 253.61,-32.73 254.03,-39.72"/>
+<text text-anchor="middle" x="167.5" y="-81.6" font-family="monospace" font-size="8.00">ClientRecvAllStepsDone /</text>
+<text text-anchor="middle" x="167.5" y="-72.6" font-family="monospace" font-size="8.00">ClientRecvStepMismatch</text>
+</g>
+<!-- c_exploring&#45;&gt;c_exploring -->
+<g id="edge14" class="edge">
+<title>c_exploring&#45;&gt;c_exploring</title>
+<path fill="none" stroke="black" d="M193.75,-350.07C203.79,-349.63 211.5,-346.28 211.5,-340 211.5,-336.08 208.49,-333.3 203.78,-331.65"/>
+<polygon fill="black" stroke="black" points="204.2,-328.17 193.75,-329.93 203.01,-335.07 204.2,-328.17"/>
+<text text-anchor="middle" x="263.5" y="-342.6" font-family="monospace" font-size="8.00">ClientExploreCmd /</text>
+<text text-anchor="middle" x="263.5" y="-333.6" font-family="monospace" font-size="8.00">ClientRecvExploreResult</text>
+</g>
+<!-- c_wait_done -->
+<g id="node9" class="node">
+<title>c_wait_done</title>
+<path fill="#f2f2f2" stroke="black" d="M276.5,-196C276.5,-196 211.5,-196 211.5,-196 205.5,-196 199.5,-190 199.5,-184 199.5,-184 199.5,-172 199.5,-172 199.5,-166 205.5,-160 211.5,-160 211.5,-160 276.5,-160 276.5,-160 282.5,-160 288.5,-166 288.5,-172 288.5,-172 288.5,-184 288.5,-184 288.5,-190 282.5,-196 276.5,-196"/>
+<text text-anchor="middle" x="244" y="-175.5" font-family="monospace" font-size="10.00">waiting_done</text>
+</g>
+<!-- c_exploring&#45;&gt;c_wait_done -->
+<g id="edge15" class="edge">
+<title>c_exploring&#45;&gt;c_wait_done</title>
+<path fill="none" stroke="black" d="M167.2,-321.88C182.19,-294 211.97,-238.59 229.72,-205.56"/>
+<polygon fill="black" stroke="black" points="232.95,-206.95 234.6,-196.48 226.78,-203.64 232.95,-206.95"/>
+<text text-anchor="middle" x="233.5" y="-284.1" font-family="monospace" font-size="8.00">ClientExploreDone</text>
+</g>
+<!-- c_wait_done&#45;&gt;c_done -->
+<g id="edge16" class="edge">
+<title>c_wait_done&#45;&gt;c_done</title>
+<path fill="none" stroke="black" d="M239.82,-159.82C236.64,-143.45 233.91,-118.35 241,-98 245.96,-83.78 255.61,-70.36 265.12,-59.6"/>
+<polygon fill="black" stroke="black" points="267.71,-61.96 271.95,-52.25 262.58,-57.19 267.71,-61.96"/>
+<text text-anchor="middle" x="295.5" y="-122.1" font-family="monospace" font-size="8.00">ClientRecvExploreDoneAck</text>
+</g>
+<!-- m_idle -->
+<g id="node11" class="node">
+<title>m_idle</title>
+<path fill="lightblue" stroke="black" d="M767,-574C767,-574 737,-574 737,-574 731,-574 725,-568 725,-562 725,-562 725,-550 725,-550 725,-544 731,-538 737,-538 737,-538 767,-538 767,-538 773,-538 779,-544 779,-550 779,-550 779,-562 779,-562 779,-568 773,-574 767,-574"/>
+<text text-anchor="middle" x="752" y="-553.5" font-family="monospace" font-size="10.00">idle</text>
+</g>
+<!-- m_validating -->
+<g id="node12" class="node">
+<title>m_validating</title>
+<path fill="#f2f2f2" stroke="black" d="M660.5,-466C660.5,-466 607.5,-466 607.5,-466 601.5,-466 595.5,-460 595.5,-454 595.5,-454 595.5,-442 595.5,-442 595.5,-436 601.5,-430 607.5,-430 607.5,-430 660.5,-430 660.5,-430 666.5,-430 672.5,-436 672.5,-442 672.5,-442 672.5,-454 672.5,-454 672.5,-460 666.5,-466 660.5,-466"/>
+<text text-anchor="middle" x="634" y="-445.5" font-family="monospace" font-size="10.00">validating</text>
+</g>
+<!-- m_idle&#45;&gt;m_validating -->
+<g id="edge17" class="edge">
+<title>m_idle&#45;&gt;m_validating</title>
+<path fill="none" stroke="black" d="M724.98,-553.5C681.46,-550.46 598.87,-541.89 581,-520 570.88,-507.6 573.42,-498.09 581,-484 583.3,-479.73 586.36,-475.9 589.87,-472.48"/>
+<polygon fill="black" stroke="black" points="592.17,-475.12 597.59,-466.02 587.67,-469.76 592.17,-475.12"/>
+<text text-anchor="middle" x="658" y="-513.6" font-family="monospace" font-size="8.00">MirrorRecvRegister /</text>
+<text text-anchor="middle" x="658" y="-504.6" font-family="monospace" font-size="8.00">MirrorRecvRegisterExplore /</text>
+<text text-anchor="middle" x="658" y="-495.6" font-family="monospace" font-size="8.00">MirrorRecvRegisterExploreSession /</text>
+<text text-anchor="middle" x="658" y="-486.6" font-family="monospace" font-size="8.00">MirrorRecvRegisterValidate</text>
+</g>
+<!-- m_generating -->
+<g id="node13" class="node">
+<title>m_generating</title>
+<path fill="#f2f2f2" stroke="black" d="M934.5,-466C934.5,-466 881.5,-466 881.5,-466 875.5,-466 869.5,-460 869.5,-454 869.5,-454 869.5,-442 869.5,-442 869.5,-436 875.5,-430 881.5,-430 881.5,-430 934.5,-430 934.5,-430 940.5,-430 946.5,-436 946.5,-442 946.5,-442 946.5,-454 946.5,-454 946.5,-460 940.5,-466 934.5,-466"/>
+<text text-anchor="middle" x="908" y="-445.5" font-family="monospace" font-size="10.00">generating</text>
+</g>
+<!-- m_idle&#45;&gt;m_generating -->
+<g id="edge19" class="edge">
+<title>m_idle&#45;&gt;m_generating</title>
+<path fill="none" stroke="black" d="M750.16,-537.96C749.43,-521.86 751.13,-498.13 765,-484 793.27,-455.2 814.92,-476.07 854,-466 855.7,-465.56 857.43,-465.1 859.17,-464.62"/>
+<polygon fill="black" stroke="black" points="860.56,-467.87 869.21,-461.75 858.63,-461.14 860.56,-467.87"/>
+<text text-anchor="middle" x="826" y="-500.1" font-family="monospace" font-size="8.00">MirrorRecvRegisterGenTraces</text>
+</g>
+<!-- m_ready -->
+<g id="node14" class="node">
+<title>m_ready</title>
+<path fill="#f2f2f2" stroke="black" d="M862,-358C862,-358 832,-358 832,-358 826,-358 820,-352 820,-346 820,-346 820,-334 820,-334 820,-328 826,-322 832,-322 832,-322 862,-322 862,-322 868,-322 874,-328 874,-334 874,-334 874,-346 874,-346 874,-352 868,-358 862,-358"/>
+<text text-anchor="middle" x="847" y="-337.5" font-family="monospace" font-size="10.00">ready</text>
+</g>
+<!-- m_idle&#45;&gt;m_ready -->
+<g id="edge18" class="edge">
+<title>m_idle&#45;&gt;m_ready</title>
+<path fill="none" stroke="black" d="M745.6,-537.88C736.82,-511.13 725.02,-459.43 752,-430 779.57,-399.93 815.05,-442.62 842,-412 852.32,-400.28 853.67,-382.84 852.39,-368.17"/>
+<polygon fill="black" stroke="black" points="855.84,-367.58 851.09,-358.11 848.9,-368.48 855.84,-367.58"/>
+<text text-anchor="middle" x="806.5" y="-450.6" font-family="monospace" font-size="8.00">MirrorRecvRegisterTraces</text>
+<text text-anchor="middle" x="806.5" y="-441.6" font-family="monospace" font-size="8.00">(sends SPEC_VALIDATED)</text>
+</g>
+<!-- m_validating&#45;&gt;m_ready -->
+<g id="edge20" class="edge">
+<title>m_validating&#45;&gt;m_ready</title>
+<path fill="none" stroke="black" d="M668.09,-429.99C676.46,-424.89 685.01,-418.81 692,-412 705.6,-398.75 699.67,-387.2 715,-376 742.67,-355.79 781.18,-347.25 809.46,-343.63"/>
+<polygon fill="black" stroke="black" points="810.21,-347.07 819.75,-342.48 809.42,-340.12 810.21,-347.07"/>
+<text text-anchor="middle" x="778.5" y="-392.1" font-family="monospace" font-size="8.00">MirrorSendSpecValidatedValid</text>
+</g>
+<!-- m_exploring -->
+<g id="node16" class="node">
+<title>m_exploring</title>
+<path fill="#f2f2f2" stroke="black" d="M621.5,-304C621.5,-304 574.5,-304 574.5,-304 568.5,-304 562.5,-298 562.5,-292 562.5,-292 562.5,-280 562.5,-280 562.5,-274 568.5,-268 574.5,-268 574.5,-268 621.5,-268 621.5,-268 627.5,-268 633.5,-274 633.5,-280 633.5,-280 633.5,-292 633.5,-292 633.5,-298 627.5,-304 621.5,-304"/>
+<text text-anchor="middle" x="598" y="-283.5" font-family="monospace" font-size="10.00">exploring</text>
+</g>
+<!-- m_validating&#45;&gt;m_exploring -->
+<g id="edge22" class="edge">
+<title>m_validating&#45;&gt;m_exploring</title>
+<path fill="none" stroke="black" d="M597.59,-429.98C590.93,-425.14 584.87,-419.19 581,-412 564.44,-381.22 575.14,-340.23 585.54,-313.73"/>
+<polygon fill="black" stroke="black" points="588.84,-314.91 589.46,-304.33 582.38,-312.21 588.84,-314.91"/>
+<text text-anchor="middle" x="633" y="-392.1" font-family="monospace" font-size="8.00">MirrorSendExplorerReady</text>
+</g>
+<!-- m_done -->
+<g id="node17" class="node">
+<title>m_done</title>
+<path fill="palegreen" stroke="black" d="M709,-142C709,-142 679,-142 679,-142 673,-142 667,-136 667,-130 667,-130 667,-118 667,-118 667,-112 673,-106 679,-106 679,-106 709,-106 709,-106 715,-106 721,-112 721,-118 721,-118 721,-130 721,-130 721,-136 715,-142 709,-142"/>
+<text text-anchor="middle" x="694" y="-121.5" font-family="monospace" font-size="10.00">done</text>
+</g>
+<!-- m_validating&#45;&gt;m_done -->
+<g id="edge21" class="edge">
+<title>m_validating&#45;&gt;m_done</title>
+<path fill="none" stroke="black" d="M668.73,-429.9C675.25,-425.04 681.2,-419.1 685,-412 686.89,-408.47 686.75,-271.99 687,-268 687.5,-259.97 688.39,-258.03 689,-250 691.53,-216.42 692.83,-177.66 693.46,-152.32"/>
+<polygon fill="black" stroke="black" points="696.97,-152.08 693.7,-142.01 689.97,-151.92 696.97,-152.08"/>
+<text text-anchor="middle" x="779.5" y="-293.1" font-family="monospace" font-size="8.00">MirrorSendRegisterError /</text>
+<text text-anchor="middle" x="779.5" y="-284.1" font-family="monospace" font-size="8.00">MirrorSendSpecValidatedValid (validate) /</text>
+<text text-anchor="middle" x="779.5" y="-275.1" font-family="monospace" font-size="8.00">MirrorSendSpecValidatedInvalid</text>
+</g>
+<!-- m_generating&#45;&gt;m_idle -->
+<g id="edge23" class="edge">
+<title>m_generating&#45;&gt;m_idle</title>
+<path fill="none" stroke="black" d="M907.54,-466.04C906.18,-482.15 901.6,-505.88 887,-520 860.99,-545.14 819.37,-552.86 789.21,-554.93"/>
+<polygon fill="black" stroke="black" points="788.87,-551.44 779.06,-555.44 789.23,-558.43 788.87,-551.44"/>
+<text text-anchor="middle" x="956" y="-500.1" font-family="monospace" font-size="8.00">MirrorSendGenTracesDone</text>
+</g>
+<!-- m_stepping -->
+<g id="node15" class="node">
+<title>m_stepping</title>
+<path fill="#f2f2f2" stroke="black" d="M828.5,-250C828.5,-250 787.5,-250 787.5,-250 781.5,-250 775.5,-244 775.5,-238 775.5,-238 775.5,-226 775.5,-226 775.5,-220 781.5,-214 787.5,-214 787.5,-214 828.5,-214 828.5,-214 834.5,-214 840.5,-220 840.5,-226 840.5,-226 840.5,-238 840.5,-238 840.5,-244 834.5,-250 828.5,-250"/>
+<text text-anchor="middle" x="808" y="-229.5" font-family="monospace" font-size="10.00">stepping</text>
+</g>
+<!-- m_ready&#45;&gt;m_stepping -->
+<g id="edge24" class="edge">
+<title>m_ready&#45;&gt;m_stepping</title>
+<path fill="none" stroke="black" d="M865.34,-321.64C869.67,-316.43 873.7,-310.38 876,-304 881.43,-288.95 884.33,-281.66 876,-268 869.96,-258.09 860.11,-250.87 849.77,-245.66"/>
+<polygon fill="black" stroke="black" points="851.19,-242.46 840.64,-241.57 848.34,-248.85 851.19,-242.46"/>
+<text text-anchor="middle" x="931" y="-284.1" font-family="monospace" font-size="8.00">MirrorSendInitialState</text>
+</g>
+<!-- m_stepping&#45;&gt;m_stepping -->
+<g id="edge25" class="edge">
+<title>m_stepping&#45;&gt;m_stepping</title>
+<path fill="none" stroke="black" d="M840.54,-242.12C850.6,-241.91 858.5,-238.54 858.5,-232 858.5,-227.91 855.41,-225.06 850.64,-223.45"/>
+<polygon fill="black" stroke="black" points="850.96,-219.96 840.54,-221.88 849.89,-226.88 850.96,-219.96"/>
+<text text-anchor="middle" x="904" y="-234.6" font-family="monospace" font-size="8.00">MirrorRecvReportOk /</text>
+<text text-anchor="middle" x="904" y="-225.6" font-family="monospace" font-size="8.00">MirrorSendNextStep</text>
+</g>
+<!-- m_stepping&#45;&gt;m_done -->
+<g id="edge26" class="edge">
+<title>m_stepping&#45;&gt;m_done</title>
+<path fill="none" stroke="black" d="M789.68,-213.97C770.85,-196.46 741.34,-169.02 720.08,-149.25"/>
+<polygon fill="black" stroke="black" points="722.36,-146.59 712.65,-142.34 717.59,-151.71 722.36,-146.59"/>
+<text text-anchor="middle" x="823.5" y="-180.6" font-family="monospace" font-size="8.00">MirrorRecvReportAllDone /</text>
+<text text-anchor="middle" x="823.5" y="-171.6" font-family="monospace" font-size="8.00">MirrorRecvReportMismatch</text>
+</g>
+<!-- m_exploring&#45;&gt;m_done -->
+<g id="edge27" class="edge">
+<title>m_exploring&#45;&gt;m_done</title>
+<path fill="none" stroke="black" d="M592.75,-267.84C589.17,-252.94 586.32,-231.12 594,-214 607.16,-184.67 635.3,-161.05 658.38,-145.53"/>
+<polygon fill="black" stroke="black" points="660.45,-148.36 666.94,-139.99 656.64,-142.49 660.45,-148.36"/>
+<text text-anchor="middle" x="641.5" y="-230.1" font-family="monospace" font-size="8.00">MirrorRecvExploreDone</text>
+</g>
+</g>
 </svg>

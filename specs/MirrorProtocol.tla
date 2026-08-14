@@ -8,7 +8,7 @@ EXTENDS Integers, Sequences, Apalache
 Ms == {"idle", "validating", "generating", "ready", "stepping", "exploring", "done"}
 
 \* Client phases
-Cs == Ms \cup {"waiting_validation", "waiting_gen", "waiting_init", "waiting_action", "waiting_ack", "waiting_done"}
+Cs == Ms \cup {"waiting_validation", "waiting_gen", "waiting_init", "waiting_action", "waiting_ack", "waiting_done", "waiting_validate"}
 
 \* Message tags (integers so TLC can enumerate the domain)
 REGISTER           == 0
@@ -20,6 +20,7 @@ NEXT_STEP          == 5
 STEP_OK            == 6
 STEP_MISMATCH      == 7
 ALL_STEPS_DONE     == 8
+REGISTER_VALIDATE  == 9
 REGISTER_TRACES    == 10
 REGISTER_TRACE_GEN == 11
 GEN_TRACES_DONE    == 12
@@ -36,17 +37,17 @@ EXPLORE_DONE       == 18
 
 VARIABLE
   \* @type: Str;
-  mp,           \* mirror phase
+  mirror_phase,           \* mirror phase
   \* @type: Str;
-  cp,           \* client phase
+  client_phase,           \* client phase
   \* @type: Str;
   action_taken, \* label of the action executed at this step
   \* @type: Str;
-  mflow,        \* active registration flow: "none" | "traces" | "session"
+  mirror_flow,        \* active registration flow: "none" | "traces" | "session" | "validate"
   \* @type: Seq(Int);
-  cl_to_mir,    \* client → mirror: message queue (tags)
+  client_to_mirror,    \* client → mirror: message queue (tags)
   \* @type: Seq(Int);
-  mir_to_cl,    \* mirror → client: message queue (tags)
+  mirror_to_client,    \* mirror → client: message queue (tags)
   \* @type: Bool;
   report_matches, \* payload bit set by ClientReport: whether the client's
                  \* reported state matches the expected state. Chosen
@@ -56,52 +57,52 @@ VARIABLE
   faulted,      \* set by fault-injection actions (MirrorProtocolFaults);
                 \* invariants are only checked on fault-free paths
   \* @type: Bool;
-  cl_closed,    \* client closed the connection prematurely
+  client_closed,    \* client closed the connection prematurely
   \* @type: Bool;
-  mir_closed    \* mirror closed the connection prematurely
+  mirror_closed    \* mirror closed the connection prematurely
 
 \* -----------------------------------------------------------------------------
 \* Client actions — send
 \* -----------------------------------------------------------------------------
 
 ClientRegister ==
-  /\ cp = "idle"
-  /\ mp = "idle"
-  /\ cl_to_mir = <<>>
-  /\ cp' = "waiting_validation"
-  /\ cl_to_mir' = Append(cl_to_mir, REGISTER)
+  /\ client_phase = "idle"
+  /\ mirror_phase = "idle"
+  /\ client_to_mirror = <<>>
+  /\ client_phase' = "waiting_validation"
+  /\ client_to_mirror' = Append(client_to_mirror, REGISTER)
   /\ action_taken' = "ClientRegister"
-  /\ UNCHANGED <<mp, mir_to_cl, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, mirror_to_client, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRegisterTraces ==
-  /\ cp = "idle"
-  /\ mp = "idle"
-  /\ cl_to_mir = <<>>
-  /\ cp' = "waiting_validation"
-  /\ cl_to_mir' = Append(cl_to_mir, REGISTER_TRACES)
+  /\ client_phase = "idle"
+  /\ mirror_phase = "idle"
+  /\ client_to_mirror = <<>>
+  /\ client_phase' = "waiting_validation"
+  /\ client_to_mirror' = Append(client_to_mirror, REGISTER_TRACES)
   /\ action_taken' = "ClientRegisterTraces"
-  /\ UNCHANGED <<mp, mir_to_cl, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, mirror_to_client, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRegisterGenTraces ==
-  /\ cp = "idle"
-  /\ mp = "idle"
-  /\ cl_to_mir = <<>>
-  /\ cp' = "waiting_gen"
-  /\ cl_to_mir' = Append(cl_to_mir, REGISTER_TRACE_GEN)
+  /\ client_phase = "idle"
+  /\ mirror_phase = "idle"
+  /\ client_to_mirror = <<>>
+  /\ client_phase' = "waiting_gen"
+  /\ client_to_mirror' = Append(client_to_mirror, REGISTER_TRACE_GEN)
   /\ action_taken' = "ClientRegisterGenTraces"
-  /\ UNCHANGED <<mp, mir_to_cl, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, mirror_to_client, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 \* Interactive symbolic exploration: at the message level the explore
 \* flow is identical to Register (validate → step through states), so it
 \* reuses the same mirror/client phases and step messages.
 ClientRegisterExplore ==
-  /\ cp = "idle"
-  /\ mp = "idle"
-  /\ cl_to_mir = <<>>
-  /\ cp' = "waiting_validation"
-  /\ cl_to_mir' = Append(cl_to_mir, REGISTER_EXPLORE)
+  /\ client_phase = "idle"
+  /\ mirror_phase = "idle"
+  /\ client_to_mirror = <<>>
+  /\ client_phase' = "waiting_validation"
+  /\ client_to_mirror' = Append(client_to_mirror, REGISTER_EXPLORE)
   /\ action_taken' = "ClientRegisterExplore"
-  /\ UNCHANGED <<mp, mir_to_cl, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, mirror_to_client, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 \* Client-driven interactive symbolic checking: the client opens an
 \* explore session and then issues explorer commands (assumeTransition,
@@ -109,302 +110,350 @@ ClientRegisterExplore ==
 \* mirror forwards them to the apalache explorer server and returns the
 \* results. Commands and results strictly alternate.
 ClientRegisterExploreSession ==
-  /\ cp = "idle"
-  /\ mp = "idle"
-  /\ cl_to_mir = <<>>
-  /\ cp' = "waiting_validation"
-  /\ cl_to_mir' = Append(cl_to_mir, REGISTER_EXPLORER_SESSION)
+  /\ client_phase = "idle"
+  /\ mirror_phase = "idle"
+  /\ client_to_mirror = <<>>
+  /\ client_phase' = "waiting_validation"
+  /\ client_to_mirror' = Append(client_to_mirror, REGISTER_EXPLORER_SESSION)
   /\ action_taken' = "ClientRegisterExploreSession"
-  /\ UNCHANGED <<mp, mir_to_cl, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, mirror_to_client, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
+
+\* Validate-only path: the client asks the mirror to validate the spec
+\* (typecheck + bounded model check) and stop — no trace generation, no
+\* stepping. The SpecValidated reply (valid or invalid) ends the session.
+ClientRegisterValidate ==
+  /\ client_phase = "idle"
+  /\ mirror_phase = "idle"
+  /\ client_to_mirror = <<>>
+  /\ client_phase' = "waiting_validate"
+  /\ client_to_mirror' = Append(client_to_mirror, REGISTER_VALIDATE)
+  /\ action_taken' = "ClientRegisterValidate"
+  /\ UNCHANGED <<mirror_phase, mirror_to_client, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientExploreCmd ==
-  /\ cp = "exploring"
-  /\ cl_to_mir = <<>>
-  /\ mir_to_cl = <<>>
-  /\ cl_to_mir' = Append(cl_to_mir, EXPLORE_CMD)
+  /\ client_phase = "exploring"
+  /\ client_to_mirror = <<>>
+  /\ mirror_to_client = <<>>
+  /\ client_to_mirror' = Append(client_to_mirror, EXPLORE_CMD)
   /\ action_taken' = "ClientExploreCmd"
-  /\ UNCHANGED <<mp, cp, mir_to_cl, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, mirror_to_client, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientExploreDone ==
-  /\ cp = "exploring"
-  /\ cl_to_mir = <<>>
-  /\ mir_to_cl = <<>>
-  /\ cl_to_mir' = Append(cl_to_mir, EXPLORE_DONE)
-  /\ cp' = "waiting_done"
+  /\ client_phase = "exploring"
+  /\ client_to_mirror = <<>>
+  /\ mirror_to_client = <<>>
+  /\ client_to_mirror' = Append(client_to_mirror, EXPLORE_DONE)
+  /\ client_phase' = "waiting_done"
   /\ action_taken' = "ClientExploreDone"
-  /\ UNCHANGED <<mp, mir_to_cl, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, mirror_to_client, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientReport ==
-  /\ cp = "waiting_action"
-  /\ cl_to_mir = <<>>
-  /\ cp' = "waiting_ack"
-  /\ cl_to_mir' = Append(cl_to_mir, REPORT_STATE)
+  /\ client_phase = "waiting_action"
+  /\ client_to_mirror = <<>>
+  /\ client_phase' = "waiting_ack"
+  /\ client_to_mirror' = Append(client_to_mirror, REPORT_STATE)
   /\ report_matches' \in BOOLEAN
   /\ action_taken' = "ClientReport"
-  /\ UNCHANGED <<mp, mir_to_cl, mflow, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, mirror_to_client, mirror_flow, faulted, client_closed, mirror_closed>>
 
 \* -----------------------------------------------------------------------------
 \* Client actions — receive messages from mirror
 \* -----------------------------------------------------------------------------
 
 ClientRecvSpecValidated ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = SPEC_VALIDATED
-  /\ cp = "waiting_validation"
-  /\ cp' = "waiting_init"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = SPEC_VALIDATED
+  /\ client_phase = "waiting_validation"
+  /\ client_phase' = "waiting_init"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvSpecValidated"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
+
+\* Validate-only: the SpecValidated reply (valid or invalid — same tag,
+\* the outcome rides in the payload) ends the session.
+ClientRecvSpecValidatedDone ==
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = SPEC_VALIDATED
+  /\ client_phase = "waiting_validate"
+  /\ client_phase' = "done"
+  /\ mirror_to_client' = Tail(mirror_to_client)
+  /\ action_taken' = "ClientRecvSpecValidatedDone"
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRecvGenTracesDone ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = GEN_TRACES_DONE
-  /\ cp = "waiting_gen"
-  /\ cp' = "idle"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = GEN_TRACES_DONE
+  /\ client_phase = "waiting_gen"
+  /\ client_phase' = "idle"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvGenTracesDone"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRecvInitialState ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = INITIAL_STATE
-  /\ cp = "waiting_init"
-  /\ cp' = "waiting_action"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = INITIAL_STATE
+  /\ client_phase = "waiting_init"
+  /\ client_phase' = "waiting_action"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvInitialState"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRecvNextStep ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = NEXT_STEP
-  /\ cp = "waiting_ack"
-  /\ cp' = "waiting_action"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = NEXT_STEP
+  /\ client_phase = "waiting_ack"
+  /\ client_phase' = "waiting_action"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvNextStep"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRecvStepOk ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = STEP_OK
-  /\ cp = "waiting_ack"
-  /\ cp' = "waiting_ack"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = STEP_OK
+  /\ client_phase = "waiting_ack"
+  /\ client_phase' = "waiting_ack"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvStepOk"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRecvStepMismatch ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = STEP_MISMATCH
-  /\ cp' = "done"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = STEP_MISMATCH
+  /\ client_phase' = "done"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvStepMismatch"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRecvAllStepsDone ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = ALL_STEPS_DONE
-  /\ cp = "waiting_ack"
-  /\ cp' = "done"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = ALL_STEPS_DONE
+  /\ client_phase = "waiting_ack"
+  /\ client_phase' = "done"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvAllStepsDone"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
+\* RegisterError replies to any registration request, including
+\* RegisterValidate (inline-spec materialization or apalache-mc failure).
 ClientRecvRegisterError ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = REGISTER_ERROR
-  /\ cp = "waiting_validation"
-  /\ cp' = "done"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = REGISTER_ERROR
+  /\ client_phase \in {"waiting_validation", "waiting_validate"}
+  /\ client_phase' = "done"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvRegisterError"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRecvExplorerReady ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = EXPLORER_READY
-  /\ cp = "waiting_validation"
-  /\ cp' = "exploring"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = EXPLORER_READY
+  /\ client_phase = "waiting_validation"
+  /\ client_phase' = "exploring"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvExplorerReady"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRecvExploreResult ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = EXPLORE_RESULT
-  /\ cp = "exploring"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = EXPLORE_RESULT
+  /\ client_phase = "exploring"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvExploreResult"
-  /\ UNCHANGED <<mp, cp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 ClientRecvExploreDoneAck ==
-  /\ mir_to_cl /= <<>> /\ Head(mir_to_cl) = EXPLORE_DONE
-  /\ cp = "waiting_done"
-  /\ cp' = "done"
-  /\ mir_to_cl' = Tail(mir_to_cl)
+  /\ mirror_to_client /= <<>> /\ Head(mirror_to_client) = EXPLORE_DONE
+  /\ client_phase = "waiting_done"
+  /\ client_phase' = "done"
+  /\ mirror_to_client' = Tail(mirror_to_client)
   /\ action_taken' = "ClientRecvExploreDoneAck"
-  /\ UNCHANGED <<mp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 \* -----------------------------------------------------------------------------
 \* Mirror actions — receive messages from client
 \* -----------------------------------------------------------------------------
 
 MirrorRecvRegister ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = REGISTER
-  /\ mp = "idle"
-  /\ mp' = "validating"
-  /\ mflow' = "traces"
-  /\ cl_to_mir' = Tail(cl_to_mir)
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = REGISTER
+  /\ mirror_phase = "idle"
+  /\ mirror_phase' = "validating"
+  /\ mirror_flow' = "traces"
+  /\ client_to_mirror' = Tail(client_to_mirror)
   /\ action_taken' = "MirrorRecvRegister"
-  /\ UNCHANGED <<cp, mir_to_cl, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, mirror_to_client, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorRecvRegisterTraces ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = REGISTER_TRACES
-  /\ mp = "idle"
-  /\ mp' = "ready"
-  /\ mflow' = "traces"
-  /\ cl_to_mir' = Tail(cl_to_mir)
-  /\ mir_to_cl' = Append(mir_to_cl, SPEC_VALIDATED)
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = REGISTER_TRACES
+  /\ mirror_phase = "idle"
+  /\ mirror_phase' = "ready"
+  /\ mirror_flow' = "traces"
+  /\ client_to_mirror' = Tail(client_to_mirror)
+  /\ mirror_to_client' = Append(mirror_to_client, SPEC_VALIDATED)
   /\ action_taken' = "MirrorRecvRegisterTraces"
-  /\ UNCHANGED <<cp, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorRecvRegisterGenTraces ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = REGISTER_TRACE_GEN
-  /\ mp = "idle"
-  /\ mp' = "generating"
-  /\ mflow' = "traces"
-  /\ cl_to_mir' = Tail(cl_to_mir)
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = REGISTER_TRACE_GEN
+  /\ mirror_phase = "idle"
+  /\ mirror_phase' = "generating"
+  /\ mirror_flow' = "traces"
+  /\ client_to_mirror' = Tail(client_to_mirror)
   /\ action_taken' = "MirrorRecvRegisterGenTraces"
-  /\ UNCHANGED <<cp, mir_to_cl, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, mirror_to_client, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorRecvRegisterExplore ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = REGISTER_EXPLORE
-  /\ mp = "idle"
-  /\ mp' = "validating"
-  /\ mflow' = "traces"
-  /\ cl_to_mir' = Tail(cl_to_mir)
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = REGISTER_EXPLORE
+  /\ mirror_phase = "idle"
+  /\ mirror_phase' = "validating"
+  /\ mirror_flow' = "traces"
+  /\ client_to_mirror' = Tail(client_to_mirror)
   /\ action_taken' = "MirrorRecvRegisterExplore"
-  /\ UNCHANGED <<cp, mir_to_cl, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, mirror_to_client, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorRecvRegisterExploreSession ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = REGISTER_EXPLORER_SESSION
-  /\ mp = "idle"
-  /\ mp' = "validating"
-  /\ mflow' = "session"
-  /\ cl_to_mir' = Tail(cl_to_mir)
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = REGISTER_EXPLORER_SESSION
+  /\ mirror_phase = "idle"
+  /\ mirror_phase' = "validating"
+  /\ mirror_flow' = "session"
+  /\ client_to_mirror' = Tail(client_to_mirror)
   /\ action_taken' = "MirrorRecvRegisterExploreSession"
-  /\ UNCHANGED <<cp, mir_to_cl, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, mirror_to_client, report_matches, faulted, client_closed, mirror_closed>>
+
+MirrorRecvRegisterValidate ==
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = REGISTER_VALIDATE
+  /\ mirror_phase = "idle"
+  /\ mirror_phase' = "validating"
+  /\ mirror_flow' = "validate"
+  /\ client_to_mirror' = Tail(client_to_mirror)
+  /\ action_taken' = "MirrorRecvRegisterValidate"
+  /\ UNCHANGED <<client_phase, mirror_to_client, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorRecvExploreCmd ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = EXPLORE_CMD
-  /\ mp = "exploring"
-  /\ cl_to_mir' = Tail(cl_to_mir)
-  /\ mir_to_cl' = Append(mir_to_cl, EXPLORE_RESULT)
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = EXPLORE_CMD
+  /\ mirror_phase = "exploring"
+  /\ client_to_mirror' = Tail(client_to_mirror)
+  /\ mirror_to_client' = Append(mirror_to_client, EXPLORE_RESULT)
   /\ action_taken' = "MirrorRecvExploreCmd"
-  /\ UNCHANGED <<mp, cp, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorRecvExploreDone ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = EXPLORE_DONE
-  /\ mp = "exploring"
-  /\ mp' = "done"
-  /\ cl_to_mir' = Tail(cl_to_mir)
-  /\ mir_to_cl' = Append(mir_to_cl, EXPLORE_DONE)
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = EXPLORE_DONE
+  /\ mirror_phase = "exploring"
+  /\ mirror_phase' = "done"
+  /\ client_to_mirror' = Tail(client_to_mirror)
+  /\ mirror_to_client' = Append(mirror_to_client, EXPLORE_DONE)
   /\ action_taken' = "MirrorRecvExploreDone"
-  /\ UNCHANGED <<cp, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 \* Mirror receives ReportState.
 \* Three distinct actions encode: match with more steps, match on the
 \* last step, and mismatch — split so trace projection can tell them apart.
 MirrorRecvReportOk ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = REPORT_STATE
-  /\ mp = "stepping"
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = REPORT_STATE
+  /\ mirror_phase = "stepping"
   /\ report_matches
-  /\ cl_to_mir' = Tail(cl_to_mir)
-  /\ mp' = "stepping"                \* match, more steps remain
-  /\ mir_to_cl' = Append(mir_to_cl, STEP_OK)            \* queued; NextStep sent separately
+  /\ client_to_mirror' = Tail(client_to_mirror)
+  /\ mirror_phase' = "stepping"                \* match, more steps remain
+  /\ mirror_to_client' = Append(mirror_to_client, STEP_OK)            \* queued; NextStep sent separately
   /\ action_taken' = "MirrorRecvReportOk"
-  /\ UNCHANGED <<cp, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorRecvReportAllDone ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = REPORT_STATE
-  /\ mp = "stepping"
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = REPORT_STATE
+  /\ mirror_phase = "stepping"
   /\ report_matches
-  /\ cl_to_mir' = Tail(cl_to_mir)
-  /\ mp' = "done"                    \* match, last step
-  /\ mir_to_cl' = Append(mir_to_cl, ALL_STEPS_DONE)
+  /\ client_to_mirror' = Tail(client_to_mirror)
+  /\ mirror_phase' = "done"                    \* match, last step
+  /\ mirror_to_client' = Append(mirror_to_client, ALL_STEPS_DONE)
   /\ action_taken' = "MirrorRecvReportAllDone"
-  /\ UNCHANGED <<cp, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorRecvReportMismatch ==
-  /\ cl_to_mir /= <<>> /\ Head(cl_to_mir) = REPORT_STATE
-  /\ mp = "stepping"
+  /\ client_to_mirror /= <<>> /\ Head(client_to_mirror) = REPORT_STATE
+  /\ mirror_phase = "stepping"
   /\ ~report_matches
-  /\ cl_to_mir' = Tail(cl_to_mir)
-  /\ mp' = "done"                    \* mismatch
-  /\ mir_to_cl' = Append(mir_to_cl, STEP_MISMATCH)
+  /\ client_to_mirror' = Tail(client_to_mirror)
+  /\ mirror_phase' = "done"                    \* mismatch
+  /\ mirror_to_client' = Append(mirror_to_client, STEP_MISMATCH)
   /\ action_taken' = "MirrorRecvReportMismatch"
-  /\ UNCHANGED <<cp, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 \* -----------------------------------------------------------------------------
 \* Mirror actions — send messages to client
 \* -----------------------------------------------------------------------------
 
 MirrorSendGenTracesDone ==
-  /\ mp = "generating"
-  /\ mir_to_cl = <<>>
-  /\ mp' = "idle"
-  /\ mir_to_cl' = Append(mir_to_cl, GEN_TRACES_DONE)
+  /\ mirror_phase = "generating"
+  /\ mirror_to_client = <<>>
+  /\ mirror_phase' = "idle"
+  /\ mirror_to_client' = Append(mirror_to_client, GEN_TRACES_DONE)
   /\ action_taken' = "MirrorSendGenTracesDone"
-  /\ UNCHANGED <<cp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorSendSpecValidatedValid ==
-  /\ mp = "validating"
-  /\ mflow = "traces"
-  /\ mir_to_cl = <<>>
-  /\ mp' = "ready"
-  /\ mir_to_cl' = Append(mir_to_cl, SPEC_VALIDATED)
+  /\ mirror_phase = "validating"
+  /\ mirror_to_client = <<>>
+  /\ \/ /\ mirror_flow = "traces"    \* stepping flow: session continues
+        /\ mirror_phase' = "ready"
+     \/ /\ mirror_flow = "validate"  \* validate-only flow: session ends
+        /\ mirror_phase' = "done"
+  /\ mirror_to_client' = Append(mirror_to_client, SPEC_VALIDATED)
   /\ action_taken' = "MirrorSendSpecValidatedValid"
-  /\ UNCHANGED <<cp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
+
+\* Invalid outcome of the validate-only path: the reply is still
+\* SpecValidated (same tag; the SpecInvalid payload is abstracted away),
+\* and the session ends. Split from the valid outcome so traces can tell
+\* them apart.
+MirrorSendSpecValidatedInvalid ==
+  /\ mirror_phase = "validating"
+  /\ mirror_flow = "validate"
+  /\ mirror_to_client = <<>>
+  /\ mirror_phase' = "done"
+  /\ mirror_to_client' = Append(mirror_to_client, SPEC_VALIDATED)
+  /\ action_taken' = "MirrorSendSpecValidatedInvalid"
+  /\ UNCHANGED <<client_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorSendRegisterError ==
-  /\ mp = "validating"
-  /\ mir_to_cl = <<>>
-  /\ mp' = "done"
-  /\ mir_to_cl' = Append(mir_to_cl, REGISTER_ERROR)
+  /\ mirror_phase = "validating"
+  /\ mirror_to_client = <<>>
+  /\ mirror_phase' = "done"
+  /\ mirror_to_client' = Append(mirror_to_client, REGISTER_ERROR)
   /\ action_taken' = "MirrorSendRegisterError"
-  /\ UNCHANGED <<cp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorSendExplorerReady ==
-  /\ mp = "validating"
-  /\ mflow = "session"
-  /\ mir_to_cl = <<>>
-  /\ mp' = "exploring"
-  /\ mir_to_cl' = Append(mir_to_cl, EXPLORER_READY)
+  /\ mirror_phase = "validating"
+  /\ mirror_flow = "session"
+  /\ mirror_to_client = <<>>
+  /\ mirror_phase' = "exploring"
+  /\ mirror_to_client' = Append(mirror_to_client, EXPLORER_READY)
   /\ action_taken' = "MirrorSendExplorerReady"
-  /\ UNCHANGED <<cp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 MirrorSendInitialState ==
-  /\ mp = "ready"
-  /\ mir_to_cl = <<>>
-  /\ mp' = "stepping"
-  /\ mir_to_cl' = Append(mir_to_cl, INITIAL_STATE)
+  /\ mirror_phase = "ready"
+  /\ mirror_to_client = <<>>
+  /\ mirror_phase' = "stepping"
+  /\ mirror_to_client' = Append(mirror_to_client, INITIAL_STATE)
   /\ action_taken' = "MirrorSendInitialState"
-  /\ UNCHANGED <<cp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 \* After sending step_ok, mirror sends next_step if more steps remain.
 MirrorSendNextStep ==
-  /\ mir_to_cl = <<>>
-  /\ cl_to_mir = <<>>
-  /\ mp = "stepping"
-  /\ cp = "waiting_ack"
-  /\ mp' = "stepping"
-  /\ mir_to_cl' = Append(mir_to_cl, NEXT_STEP)
+  /\ mirror_to_client = <<>>
+  /\ client_to_mirror = <<>>
+  /\ mirror_phase = "stepping"
+  /\ client_phase = "waiting_ack"
+  /\ mirror_phase' = "stepping"
+  /\ mirror_to_client' = Append(mirror_to_client, NEXT_STEP)
   /\ action_taken' = "MirrorSendNextStep"
-  /\ UNCHANGED <<cp, cl_to_mir, mflow, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<client_phase, client_to_mirror, mirror_flow, report_matches, faulted, client_closed, mirror_closed>>
 
 \* -----------------------------------------------------------------------------
 \* Init
 \* -----------------------------------------------------------------------------
 
 Init ==
-  /\ mp = "idle"
-  /\ cp = "idle"
+  /\ mirror_phase = "idle"
+  /\ client_phase = "idle"
   /\ action_taken = "init"
-  /\ mflow = "none"
-  /\ cl_to_mir = <<>>
-  /\ mir_to_cl = <<>>
+  /\ mirror_flow = "none"
+  /\ client_to_mirror = <<>>
+  /\ mirror_to_client = <<>>
   /\ report_matches = FALSE
   /\ faulted = FALSE
-  /\ cl_closed = FALSE
-  /\ mir_closed = FALSE
+  /\ client_closed = FALSE
+  /\ mirror_closed = FALSE
 
 \* -----------------------------------------------------------------------------
 \* Next
@@ -412,10 +461,10 @@ Init ==
 
 \* Explicit terminal state: both sides finished; halt cleanly.
 Halt ==
-  /\ mp = "done"
-  /\ cp = "done"
+  /\ mirror_phase = "done"
+  /\ client_phase = "done"
   /\ action_taken' = "Halt"
-  /\ UNCHANGED <<mp, cp, mflow, cl_to_mir, mir_to_cl, report_matches, faulted, cl_closed, mir_closed>>
+  /\ UNCHANGED <<mirror_phase, client_phase, mirror_flow, client_to_mirror, mirror_to_client, report_matches, faulted, client_closed, mirror_closed>>
 
 Next ==
   \/ Halt
@@ -424,10 +473,12 @@ Next ==
   \/ ClientRegisterGenTraces
   \/ ClientRegisterExplore
   \/ ClientRegisterExploreSession
+  \/ ClientRegisterValidate
   \/ ClientExploreCmd
   \/ ClientExploreDone
   \/ ClientReport
   \/ ClientRecvSpecValidated
+  \/ ClientRecvSpecValidatedDone
   \/ ClientRecvGenTracesDone
   \/ ClientRecvInitialState
   \/ ClientRecvNextStep
@@ -443,6 +494,7 @@ Next ==
   \/ MirrorRecvRegisterGenTraces
   \/ MirrorRecvRegisterExplore
   \/ MirrorRecvRegisterExploreSession
+  \/ MirrorRecvRegisterValidate
   \/ MirrorRecvExploreCmd
   \/ MirrorRecvExploreDone
   \/ MirrorRecvReportOk
@@ -450,6 +502,7 @@ Next ==
   \/ MirrorRecvReportMismatch
   \/ MirrorSendGenTracesDone
   \/ MirrorSendSpecValidatedValid
+  \/ MirrorSendSpecValidatedInvalid
   \/ MirrorSendRegisterError
   \/ MirrorSendExplorerReady
   \/ MirrorSendInitialState
@@ -459,7 +512,7 @@ Next ==
 \* Specification
 \* -----------------------------------------------------------------------------
 
-Spec == Init /\ [][Next]_<<mp, cp, action_taken, mflow, cl_to_mir, mir_to_cl, report_matches, faulted, cl_closed, mir_closed>>
+Spec == Init /\ [][Next]_<<mirror_phase, client_phase, action_taken, mirror_flow, client_to_mirror, mirror_to_client, report_matches, faulted, client_closed, mirror_closed>>
 
 \* -----------------------------------------------------------------------------
 \* Invariants
@@ -467,8 +520,8 @@ Spec == Init /\ [][Next]_<<mp, cp, action_taken, mflow, cl_to_mir, mir_to_cl, re
 
 \* Both sides are always in valid phases.
 PhaseOk ==
-  /\ mp \in Ms
-  /\ cp \in Cs
+  /\ mirror_phase \in Ms
+  /\ client_phase \in Cs
 
 \* The client never waits on a message the mirror will never send:
 \* when the client is mid-session, the mirror is in a phase that can respond.
@@ -476,9 +529,9 @@ PhaseOk ==
 \* (MirrorProtocolFaults) may of course strand the client.
 ClientNeverStuck ==
   ~faulted =>
-    /\ cp = "waiting_init" => mp \in {"validating", "ready", "stepping"}
-    /\ cp = "waiting_ack"  => mp \in {"stepping", "done"}
-    /\ cp = "waiting_done" => mp \in {"exploring", "done"}
+    /\ client_phase = "waiting_init" => mirror_phase \in {"validating", "ready", "stepping"}
+    /\ client_phase = "waiting_ack"  => mirror_phase \in {"stepping", "done"}
+    /\ client_phase = "waiting_done" => mirror_phase \in {"exploring", "done"}
 
 Inv == PhaseOk /\
        ClientNeverStuck
@@ -486,7 +539,7 @@ Inv == PhaseOk /\
 \* Force trace generation: Apalache finds counterexamples
 \* showing paths from idle to done.
 TraceComplete ==
-  cp /= "done"
+  client_phase /= "done"
 
 \* Force a trace that completes through a SUCCESSFUL terminal message
 \* (step mismatch counts as a completed conformance run). Error paths
@@ -498,10 +551,10 @@ TraceSuccess ==
 
 \* Force stepping path through ClientReport and mirror response.
 TraceStepping ==
-  ~(mir_to_cl /= <<>> /\ Head(mir_to_cl) = STEP_OK)
+  ~(mirror_to_client /= <<>> /\ Head(mirror_to_client) = STEP_OK)
 
 \* View that captures protocol-relevant state for trace inspection.
-MirrorView == <<mp, cp, action_taken, mflow, cl_to_mir, mir_to_cl>>
+MirrorView == <<mirror_phase, client_phase, action_taken, mirror_flow, client_to_mirror, mirror_to_client>>
 
 \* -----------------------------------------------------------------------------
 \* Projection to the MirrorStep vocabulary of MinimalTraceCheck

@@ -150,7 +150,7 @@ testRegisterHappyPath = testCase "e2e Register: hourClockClient passes verificat
   assertCleanSteps steps
 
 -- | E2E, Register flow, conformance-failure path (MirrorProtocol.tla:
--- MirrorRecvReportState with the mismatch branch, mp' = "done").
+-- MirrorRecvReportState with the mismatch branch, mirror_phase' = "done").
 --
 -- Same setup as the happy path, but the client is a 'fixedClient' that always
 -- reports @{hr: 99}@ regardless of the actual HourClock state. The very first
