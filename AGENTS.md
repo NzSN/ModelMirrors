@@ -2,25 +2,22 @@
 
 ## Build & Test
 
-### Bazel (primary)
-```sh
-bazel build //...                        # build all targets
-bazel test //test:ModelMirrors-test       # run tests
-```
+The project is **cabal-only** — the Bazel build has been removed. Build the
+library + executable and run the tests with plain `cabal`:
 
-### Cabal (for IDE / Hackage)
 ```sh
 cabal build all    # build library + executable
 cabal test all     # run tests
 ```
 
-There is no lint, format, or CI config. Both builds use `-Wall` (set in cabal `common warnings` stanza and Bazel `ghcopts`). To make warnings fatal: `cabal build --ghc-options=-Werror`.
+`-Wall` is set in cabal's `common warnings` stanza. To make warnings fatal:
+`cabal build --ghc-options=-Werror`. An optional `cabal repl` / HLS cradle is
+provided via `hie.yaml`. There is no lint or format config.
 
 ## Prerequisites
 
-- Bazel 9.1.0
-- GHC 9.10+ (bindist GHC 9.10.1 managed by Bazel; cabal uses local GHC)
-- `apalache-mc` on `PATH` (tests shell out to it; Bazel provides it via `@apalache_mc` repo)
+- GHC 9.10+
+- `apalache-mc` on `PATH` — integration tests shell out to it
 
 ## Code Style
 
@@ -31,19 +28,19 @@ There is no lint, format, or CI config. Both builds use `-Wall` (set in cabal `c
 ## Package Structure (single package)
 
 - Package name: **`ModelMirrors`**
-- Library (18 exposed modules across 4 namespaces):
+- Library (26 exposed modules across 4 namespaces):
   - `Apalache.{Core,Command,Trace,Types}` — apalache-mc wrapper (types, command runner, trace parsing)
   - `Apalache.SpecSource` — materializes inline spec sources (`{sources: [root, ...deps]}`) to a temp dir for the CLI flows (files named after MODULE headers so EXTENDS resolves)
 - `Engine`, `Engine.{Core,Interactive,Replay,Types}` — trace replay engine and step diffing
-- `Protocol.{Core,Client,Mirror,Registry}`, `Protocol.Format.Json`, `Protocol.Transport.{Core,Mock,Stdio,Tcp,Tls}` — IPC protocol layer; `Tls` adds TLS 1.3 mutual-auth transport (`serveTls`/`connectTls`/`connectTlsPinned`); `Registry` is a Consul HTTP API client for service discovery
-- Executable: `app/Main.hs` — default: stdio mirror (`run StdioTransport`); `--serve <port>`: TCP daemon, one protocol session per connection, sequential accept loop (client drops are logged and survived); `--server <port> --tls --cert c --key k --ca ca [--registry url] [--jobs n]`: mTLS daemon (TLS 1.3, client certs required), bounded concurrent dispatcher (`serveTlsConcurrent`, default 4 jobs; handshake in worker thread; per-session apalache `--run-dir` temp dirs; explorer servers on ephemeral ports), optional Consul registration with 10s TTL heartbeat
+- `Protocol.{Core,Client,Mirror,Registry,ValidateOpts}`, `Protocol.Format.Json`, `Protocol.Transport.{Core,Mock,Stdio,Tcp,Tls}` — IPC protocol layer; `Tls` adds TLS 1.3 mutual-auth transport (`serveTls`/`connectTls`/`connectTlsPinned`); `Registry` is a Consul HTTP API client for service discovery; `ValidateOpts` is the hand-rolled option parser for the `validate` CLI subcommand
+- Executable: `app/Main.hs` — default: stdio mirror (`run StdioTransport`); `--serve <port>`: TCP daemon, one protocol session per connection, sequential accept loop (client drops are logged and survived); `--server <port> --tls --cert c --key k --ca ca [--registry url] [--jobs n]`: mTLS daemon (TLS 1.3, client certs required), bounded concurrent dispatcher (`serveTlsConcurrent`, default 4 jobs; handshake in worker thread; per-session apalache `--run-dir` temp dirs; explorer servers on ephemeral ports), optional Consul registration with 10s TTL heartbeat; `validate --host H --port P --spec S.tla [--dep D]... [--bound N] [--inv I] [--tls ...] [--pin SHA256]`: validate-only client (exit 0 VALID / 1 INVALID / 2 infrastructure). Validate sessions isolate apalache fully: both typecheck and check run with cwd = per-session temp dir (apalache writes `_apalache-out/<Spec>/<timestamp>/` + `tmp/` into the process cwd even with `--run-dir`), and the mirror rejects validate bounds outside `[1, maxValidateBound=100]` with `register_error`
 - `scripts/gen-certs.sh <outdir> <host> [days]` — generates the private CA + server/client certs for mTLS
 - Tests: `test/Main.hs` — uses `tasty` + `tasty-hunit` test framework
 - Test spec: `test/specs/HourClock.tla` (real TLA+ spec used by integration tests)
 
 ## Testing Notes
 
-Tests are integration tests that invoke `apalache-mc` on `test/specs/HourClock.tla` — typecheck + model check + trace generation. Expect seconds to minutes runtime. `apalache-mc` must be on `PATH` for cabal-based tests; Bazel provides it automatically via the `@apalache_mc` external repo.
+Tests are integration tests that invoke `apalache-mc` on `test/specs/HourClock.tla` — typecheck + model check + trace generation. Expect seconds to minutes runtime. `apalache-mc` must be on `PATH`.
 
 `EngineSpec` is pure and does not require `apalache-mc`. `Apalache.{Command,Trace,Types}Spec` do.
 
@@ -52,11 +49,7 @@ Run a single test by calling its spec function from `test/Main.hs` via `cabal re
 ## Key Quirks
 
 - No lockfile, no stack, no nix — plain `cabal` only; `cabal.project` sets `allow-newer: serialise:base, cborg:base` (stale Hackage bounds vs GHC 9.14's base 4.22, needed by `tls`)
-- TLS deps (`tls`, `crypton*`) are cabal-only: Bazel `stack_snapshot` can't build `hpke` (a `tls` dep) under rules_haskell — do not add them to `src/BUILD.bazel`. TLS sources live in `src-tls/` (cabal-only `hs-source-dirs`); `stubs/` provides Bazel-only stub modules (`Protocol.Transport.Tls`, `TlsTransportSpec`) so `bazel build //...` and `bazel test` stay green. `stubs/` must not be a `bazel-*`-prefixed dir (Bazel skips those in the execroot)
-- Bazel test needs a locale: `.bazelrc` sets `test --test_env=LANG/LC_ALL=C.UTF-8` — apalache-mc's config parser fails with `Configuration error: Input length = 1` otherwise. Test is `size = "large"` (suite ~400s)
+- TLS deps (`tls`, `crypton*`) and the TLS modules live in `src-tls/`, which the library adds via `hs-source-dirs: src, src-tls`
+- `apalache-mc`'s config parser fails without a UTF-8 locale (`Configuration error: Input length = 1`); run tests with `LC_ALL=C.UTF-8` (the integration suite is `size = "large"`, ~400s)
 - IDE support via `hie.yaml` (HLS cradle config for cabal)
 - `_apalache-out/` is generated by apalache-mc (gitignored)
-- Bazel: `rules_haskell` and `rules_sh` are pinned to patched master commits (not releases) for Bazel 9 compatibility; see `rules_haskell_runfiles_fix.patch`
-- `stack_snapshot.snapshot(local_snapshot = ...)` is in a dev-only extension instance — consumers must provide their own snapshot
-- Stackage resolver: `nightly-2026-05-01` (used by Bazel stack_snapshot, not by cabal)
-- `.bazelrc` flags: `test --test_output=errors`, `common --noincompatible_disallow_ctx_resolve_tools`

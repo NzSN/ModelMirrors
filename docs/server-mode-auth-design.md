@@ -117,7 +117,7 @@ This enables optional AES-GCM encryption of the session later without changing t
 | Option | Verdict |
 |--------|---------|
 | TLS + pinned certificates | Strongest guarantees, but pulls in the `tls`/`x509` stack and certificate management. Revisit if the tool ever leaves trusted networks. The `auth_ok` session-key hook keeps this path open. |
-| NaCl/libsodium (`saltine`) | Excellent primitives, but a C dependency complicates the plain-cabal and Bazel builds. |
+| NaCl/libsodium (`saltine`) | Excellent primitives, but a C dependency complicates the cabal build. |
 | Static token in every message | Simple, but no replay protection and exposes the token in plaintext on the wire. Rejected. |
 
 ## Residual Risks

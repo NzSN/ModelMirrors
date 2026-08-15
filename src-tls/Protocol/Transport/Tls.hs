@@ -1,6 +1,7 @@
 module Protocol.Transport.Tls
   ( TlsTransport
   , tlsTransport
+  , tlsClose
   , mkServerParams
   , mkClientParams
   , serveTls
@@ -12,7 +13,7 @@ module Protocol.Transport.Tls
   ) where
 
 import Control.Concurrent (forkIO, newQSem, signalQSem, waitQSem)
-import Control.Exception (SomeException, bracket, bracketOnError, try)
+import Control.Exception (SomeException, bracket, bracketOnError, catch, try)
 import Control.Monad (forever)
 import Data.Bits ((.&.))
 import Data.ByteString qualified as BS
@@ -58,6 +59,7 @@ import Network.TLS
   , defaultParamsServer
   , defaultValidationCache
   , getServerCertificateChain
+  , bye
   , handshake
   , recvData
   , sendData
@@ -78,6 +80,12 @@ data TlsTransport = TlsTransport Context (IORef BS.ByteString)
 
 tlsTransport :: Context -> IO TlsTransport
 tlsTransport ctx = TlsTransport ctx <$> newIORef BS.empty
+
+-- | Best-effort graceful close: send @close_notify@, ignoring the error if the
+-- peer has already dropped the connection. The underlying socket is released
+-- by the process on exit.
+tlsClose :: TlsTransport -> IO ()
+tlsClose (TlsTransport ctx _) = bye ctx `catch` \(_ :: SomeException) -> pure ()
 
 instance Transport TlsTransport where
   send (TlsTransport ctx _) bs = sendData ctx (LBS.fromStrict (B8.snoc bs '\n'))

@@ -12,9 +12,8 @@
 | `Apalache.Rpc.Client` — HTTP client, typed method dispatch | Done |
 | `Apalache.Explorer` — server lifecycle, high-level exploration API | Done |
 | `Apalache.Core` re-exports + `.cabal` deps (`base64-bytestring`, `http-client`, `http-types`) | Done |
-| Bazel BUILD/MODULE compatibility | Done |
 | `docs/apalache/interactive.md` — reference documentation for the JSON-RPC API | Done |
-| Existing 43 tests pass (cabal); 40/43 pass (Bazel) | Done |
+| Existing 43 tests pass (cabal) | Done |
 
 ## Remaining
 
@@ -200,9 +199,8 @@ run transport = StepPending $ do
 | `src/Protocol/Core.hs` | MODIFY | +1 |
 | `src/Protocol/Format/Json.hs` | MODIFY | +20 |
 | `src/Protocol/Mirror.hs` | MODIFY | +100 |
-| `test/BUILD.bazel` | MODIFY | +1 |
 
-No new dependencies. No new Bazel packages.
+No new dependencies.
 
 ### 6. Effort estimate
 
@@ -214,7 +212,6 @@ No new dependencies. No new Bazel packages.
 | `MkExploreMirror` + `exploreMirror` loop | 1 hr |
 | `RegisterExplore` message + JSON instance | 30 min |
 | `run` routing + `MirrorStep` variant | 15 min |
-| Bazel BUILD update | 15 min |
 | **Total** | **~4 hr** |
 
 ### 7. Edge cases

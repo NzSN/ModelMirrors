@@ -6,6 +6,7 @@ module Protocol.Client
   , runClientGenTraces
   , runClientGenTracesWithSpec
   , runClientExplore
+  , runClientValidate
   , exploreSession
   , cannedClient
   , fixedClient
@@ -76,6 +77,16 @@ runClientExplore client spec invs exports maxSteps = do
     Right (RegisterError e)               -> pure (Left e)
     Right (ProtocolError e)               -> pure (Left e)
     Right _                                -> pure (Left (T.pack "Unexpected message: expected SpecValidated"))
+
+runClientValidate :: Transport t => t -> ApalacheConfig -> Int -> Maybe ApalacheSpec -> IO (Either Text ValidateResult)
+runClientValidate transport cfg bound mSpec = do
+  sendMsg transport (RegisterValidate cfg bound mSpec)
+  recvMsg transport >>= \case
+    Left err                   -> pure (Left (T.pack err))
+    Right (SpecValidated v)    -> pure (Right v)
+    Right (RegisterError e)    -> pure (Left e)
+    Right (ProtocolError e)    -> pure (Left e)
+    Right _ -> pure (Left (T.pack "Unexpected message: expected SpecValidated"))
 
 exploreSession :: Transport t => t -> ApalacheSpec -> [Text] -> [Text] -> IO (Either Text (Int, Int, Int))
 exploreSession t spec invs exports = do

@@ -43,6 +43,11 @@ instance ToJSON ClientMessage where
     , fromString "invariants" .= invs
     , fromString "exports" .= exports
     ]
+  toJSON (RegisterValidate cfg bound mSpec) = object $
+    [ fromString "proto_step"     .= T.pack "register_validate"
+    , fromString "apalacheConfig" .= cfg
+    , fromString "bound"          .= bound
+    ] ++ maybe [] (\s -> [fromString "spec" .= s]) mSpec
   toJSON (ExploreAssumeTransition tid) = object
     [ fromString "proto_step" .= T.pack "explore_assume_transition"
     , fromString "transitionId" .= tid
@@ -96,6 +101,10 @@ instance FromJSON ClientMessage where
           RegisterExploreSession <$> o .: fromString "spec"
                                  <*> o .: fromString "invariants"
                                  <*> o .: fromString "exports"
+      t | t == T.pack "register_validate" ->
+          RegisterValidate <$> o .: fromString "apalacheConfig"
+                           <*> o .: fromString "bound"
+                           <*> o .:? fromString "spec"
       t | t == T.pack "explore_assume_transition" ->
           ExploreAssumeTransition <$> o .: fromString "transitionId"
       t | t == T.pack "explore_next_step" ->

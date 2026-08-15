@@ -67,7 +67,7 @@ This step is defense in depth: the mTLS handshake in step 2 already authenticate
 
 ### Step 4 — Session
 
-Speak the session protocol exactly as on stdio/TCP: newline-delimited JSON, and the **first message must be a `Register*` message** (`register`, `register_traces`, `register_trace_gen`, `register_explore`, or `register_explore_session`). Any other first message receives a `protocol_error` and the connection is closed. There is no greeting, banner, or version exchange — the registry and the TLS handshake carry all setup information.
+Speak the session protocol exactly as on stdio/TCP: newline-delimited JSON, and the **first message must be a `Register*` message** (`register`, `register_traces`, `register_trace_gen`, `register_explore`, `register_explore_session`, or `register_validate`). Any other first message receives a `protocol_error` and the connection is closed. There is no greeting, banner, or version exchange — the registry and the TLS handshake carry all setup information.
 
 ### Pseudocode
 
@@ -130,6 +130,32 @@ Initiates a session. Sends the path to a TLA+ spec and trace generation paramete
 }
 ```
 
+### RegisterValidate
+
+Validate-only request. Runs apalache typecheck + bounded model check and stops — no trace generation, no stepping. The mirror replies exactly once and the session ends.
+
+| Field | Tag |
+|-------|-----|
+| `proto_step` | `"register_validate"` |
+| `apalacheConfig` | `object` — apalache configuration (same shape as `Register`) |
+| `bound` | `number` (integer) — check length bound |
+| `spec` | `object` (optional) — inline spec sources (`{ "sources": [ ... ] }`); when present, overrides `apalacheConfig.specPath` |
+
+**Example:**
+```json
+{
+  "proto_step": "register_validate",
+  "apalacheConfig": {
+    "specPath": "./specs/HourClock.tla",
+    "invariant": "TypeOK",
+    "lengthBound": 10
+  },
+  "bound": 10
+}
+```
+
+On success the reply is `spec_validated` with `result` `"valid"`. A typecheck/check failure replies `spec_validated` with `result` `{ "invalid": "..." }`. An un-materializable inline spec or an apalache-mc infrastructure failure replies `register_error`.
+
 ### ReportState
 
 Reports the client's actual state after executing an action. The mirror compares it against the expected state from the ITF trace.
@@ -157,7 +183,7 @@ The mirror sends these message types in response.
 
 ### SpecValidated
 
-Sent after `Register`. Reports whether the spec passed apalache typecheck + model check.
+Sent after `Register` or `RegisterValidate`. Reports whether the spec passed apalache typecheck + model check.
 
 | Field | Tag |
 |-------|-----|
@@ -300,9 +326,9 @@ The full client and mirror phase machines (from `specs/MirrorProtocol.tla`) are 
                       └────────┘
 ```
 
-1. **Idle** — session start. Client sends `Register`.
-2. **Validating** — mirror runs apalache typecheck + model check. Sends `SpecValidated`.
-3. **Ready** — mirror sends `InitialState` (first trace state).
+1. **Idle** — session start. Client sends `Register`, or `RegisterValidate` for a validate-only session.
+2. **Validating** — mirror runs apalache typecheck + model check. Sends `SpecValidated`. On `RegisterValidate`, the session ends here: `Validating` transitions straight to `Done` (valid or invalid), with no trace generation or stepping.
+3. **Ready** — mirror sends `InitialState` (first trace state). (`Register` only.)
 4. **Stepping** — for each step:
    - Mirror sends `InitialState` (step 0) or `NextStep` (step 1+) with the action name.
    - Client executes the action, then sends `ReportState` with its actual state.

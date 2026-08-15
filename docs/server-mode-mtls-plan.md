@@ -4,16 +4,14 @@ Implementation plan for `docs/server-mode-mtls-design.md`. Phased so each phase 
 
 ## Phase 0 — Dependency and build groundwork
 
-**Goal**: `tls`, `x509`, `x509-store` build under both cabal and Bazel before any code depends on them.
+**Goal**: `tls`, `x509`, `x509-store` build under cabal before any code depends on them.
 
 Tasks:
 
 1. Add to `ModelMirrors.cabal` library `build-depends`: `tls >= 2.0`, `x509 >= 1.7`, `x509-store >= 1.6`.
-2. Add the same packages to `stackage_snapshot.yaml` (resolver `nightly-2026-05-01`; verify versions exist in the snapshot, pin in `extra-deps` style if not).
-3. Add `@stackage//:tls`, `@stackage//:x509`, `@stackage//:x509-store` to `src/BUILD.bazel` `deps`.
-4. Verify: `cabal build all` and `bazel build //...`.
+2. Verify: `cabal build all`.
 
-Gate: both builds green. **Risk**: Stackage nightly may lag `tls` releases — if the snapshot lacks a compatible version, pin one in the snapshot file; this is the highest-uncertainty item in the whole plan, so it goes first.
+Gate: build green. **Risk**: the cabal resolver may lag `tls` releases — fall back to `allow-newer` or a compatible version pin in `cabal.project` if needed.
 
 ## Phase 1 — `TlsTransport` and server-side TLS accept loop
 
@@ -25,10 +23,10 @@ Tasks:
    - `TlsTransport` wrapping a `tls` `Context`, implementing the existing two-method `Transport` class (`send` = one JSON line via `sendData`, `recv` = accumulate `recvData` until newline — the `tls` package is stream-oriented, so newline framing must be re-implemented on top; reuse the same framing convention as `Stdio.hs:10-16`).
    - `mkServerParams :: FilePath -> FilePath -> FilePath -> IO ServerParams` — load cert/key/CA via `x509-store`, configure `tls` for TLS 1.3 only, `requireClientCert`.
 2. `serveTls :: ServerParams -> PortNumber -> IO ()` in the same module, mirroring the structure of `serveTcp` (`Tcp.hs:53-72`): `AI_PASSIVE` bind, sequential accept, per-connection `try`, log-and-survive client drops. Each accepted socket is upgraded via `contextNew` + `handshake` before `run`.
-3. Export `Protocol.Transport.Tls` from the library (cabal `exposed-modules`, Bazel picks it up via `glob`).
+3. Export `Protocol.Transport.Tls` from the library (`exposed-modules`).
 4. Unit test with `Mock`-style harness where possible; real TLS handshake test deferred to Phase 4.
 
-Gate: `bazel build //...`, existing `bazel test //test:ModelMirrors-test` still green (no behavior change).
+Gate: existing `cabal build all` / `cabal test all` still green (no behavior change).
 
 ## Phase 2 — CLI wiring and startup validation
 
@@ -98,7 +96,7 @@ Gate: a fresh clone can follow the README to a working mTLS session.
   - Discovery round-trip and malformed-probe handling (Phase 4).
 - Test certs: generated per-run into a temp dir by the test setup (never committed) or committed with a clearly-test-only CA; prefer per-run generation to avoid expired-cert flakes — pin validity to a wide window.
 - **No `apalache-mc` dependency** for the new transport tests; keep them fast like `TcpTransportSpec`, unlike the Apalache integration specs.
-- Full suite green under both `cabal test all` and `bazel test //test:ModelMirrors-test` before each phase merges.
+- Full suite green under `cabal test all` before each phase merges.
 
 ## Deferred (explicitly out of scope)
 
@@ -111,7 +109,7 @@ Gate: a fresh clone can follow the README to a working mTLS session.
 
 | Phase | Deliverable | Depends on |
 |-------|-------------|------------|
-| 0 | TLS deps build under cabal + Bazel | — |
+| 0 | TLS deps build under cabal | — |
 | 1 | `TlsTransport` + `serveTls` | 0 |
 | 2 | `--server --tls` CLI + validation | 1 |
 | 3 | Client TLS + end-to-end session | 1 |

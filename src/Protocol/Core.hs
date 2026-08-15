@@ -59,6 +59,7 @@ data ClientMessage
   | RegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath) !(Maybe ApalacheSpec)
   | RegisterExplore !ApalacheSpec ![InvariantName] ![ExportName] !MaxSteps
   | RegisterExploreSession !ApalacheSpec ![InvariantName] ![ExportName]
+  | RegisterValidate !ApalacheConfig !Int !(Maybe ApalacheSpec)
   | ExploreAssumeTransition !TransitionId
   | ExploreNextStep
   | ExploreQueryState

@@ -1,6 +1,7 @@
 module Protocol.Transport.Tcp
   ( TcpTransport
   , tcpTransport
+  , connectTcp
   , tcpClose
   , serveTcp
   , serveTcpConcurrent
@@ -14,12 +15,14 @@ import Data.ByteString.Char8 qualified as B8
 import Network.Socket
   ( AddrInfo (..)
   , AddrInfoFlag (..)
+  , HostName
   , PortNumber
   , Socket
   , SocketOption (..)
   , accept
   , bind
   , close
+  , connect
   , defaultHints
   , getAddrInfo
   , listen
@@ -50,6 +53,18 @@ tcpTransport sock = TcpTransport <$> socketToHandle sock ReadWriteMode
 -- through this function for the peer to see a disconnect.
 tcpClose :: TcpTransport -> IO ()
 tcpClose (TcpTransport h) = hClose h
+
+-- | Connect to a mirror server over plain TCP and return a ready transport
+-- (the client-side counterpart of 'serveTcp'/'serveTcpConcurrent').
+connectTcp :: HostName -> PortNumber -> IO TcpTransport
+connectTcp host port = withSocketsDo $ do
+  addrs <- getAddrInfo (Just defaultHints) (Just host) (Just (show port))
+  case addrs of
+    [] -> error ("connectTcp: cannot resolve " ++ host ++ ":" ++ show port)
+    (addr : _) -> do
+      s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+      connect s (addrAddress addr)
+      tcpTransport s
 
 instance Transport TcpTransport where
   send (TcpTransport h) bs = B8.hPutStrLn h bs >> hFlush h

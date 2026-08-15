@@ -7,6 +7,7 @@ module Protocol.Mirror
   , MkRunMirror (..)
   , MkRunMirrorWithTraces (..)
   , MkRunMirrorGenTraces (..)
+  , MkRunValidate (..)
   , MkExploreMirror (..)
   , MkExploreSession (..)
   , MkReplayAll (..)
@@ -19,10 +20,12 @@ module Protocol.Mirror
   , runMirrorGenTracesWithSpec
   , runMirrorExplore
   , runMirrorExploreSession
+  , runMirrorValidate
+  , maxValidateBound
   , run
   ) where
 
-import Apalache.Command (generateTraceFilesIn, generateTracesIn)
+import Apalache.Command (generateTraceFilesIn, generateTracesIn, validateSpecIn)
 import Apalache.Explorer
   ( Explorer (..)
   , exploreAssumeState
@@ -86,6 +89,7 @@ data MirrorStep
   | MirrorRecvRegisterGenTraces !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath) !(Maybe ApalacheSpec)
   | MirrorRecvRegisterExplore !ApalacheSpec ![Text] ![Text] !Int
   | MirrorRecvRegisterExploreSession !ApalacheSpec ![Text] ![Text]
+  | MirrorRecvRegisterValidate !ApalacheConfig !Int !(Maybe ApalacheSpec)
   | MirrorRecvExploreCmd !Text
   | MirrorRecvReportState !Int !Text
   | MirrorSendGenTracesDone ![FilePath]
@@ -109,6 +113,7 @@ mirrorStepActionName = \case
   MirrorRecvRegisterGenTraces{}   -> T.pack "MirrorRecvRegisterGenTraces"
   MirrorRecvRegisterExplore{}     -> T.pack "MirrorRecvRegisterExplore"
   MirrorRecvRegisterExploreSession{} -> T.pack "MirrorRecvRegisterExploreSession"
+  MirrorRecvRegisterValidate{}   -> T.pack "MirrorRecvRegisterValidate"
   MirrorRecvExploreCmd{}          -> T.pack "MirrorRecvExploreCmd"
   MirrorRecvReportState{}         -> T.pack "MirrorRecvReportState"
   MirrorSendGenTracesDone{}       -> T.pack "MirrorSendGenTracesDone"
@@ -139,6 +144,7 @@ data RecvMsg t = RecvMsg t
 data MkRunMirror t = MkRunMirror t ApalacheConfig TraceGenerationConfig (Maybe ApalacheSpec)
 data MkRunMirrorWithTraces t = MkRunMirrorWithTraces t ApalacheConfig [FilePath]
 data MkRunMirrorGenTraces t = MkRunMirrorGenTraces t ApalacheConfig TraceGenerationConfig (Maybe FilePath) (Maybe ApalacheSpec)
+data MkRunValidate t = MkRunValidate t ApalacheConfig Int (Maybe ApalacheSpec)
 data MkExploreMirror t = MkExploreMirror t ApalacheSpec [Text] [Text] Int
 data MkExploreSession t = MkExploreSession t ApalacheSpec [Text] [Text]
 data MkReplayAll t = MkReplayAll t (StateDriver IO) [ItfTrace]
@@ -166,6 +172,9 @@ instance Transport t => Step (RecvMsg t) where
       Right (RegisterExploreSession spec invs exports) -> do
         steps <- exec (MkExploreSession transport spec invs exports)
         pure (MirrorRecvRegisterExploreSession spec invs exports : steps)
+      Right (RegisterValidate apCfg bound mSpec) -> do
+        steps <- exec (MkRunValidate transport apCfg bound mSpec)
+        pure (MirrorRecvRegisterValidate apCfg bound mSpec : steps)
       Right _ -> do
         sendMsg transport (ProtocolError (T.pack "Expected Register message"))
         pure [MirrorSendProtocolError (T.pack "Expected Register message")]
@@ -274,6 +283,35 @@ readTraceContents ps = fmap sequence (traverse readOne ps)
       pure $ case A.decode bs of
         Just v  -> Right v
         Nothing -> Left (T.pack ("failed to parse generated trace: " ++ p))
+
+-- | Server-side cap on the check bound a remote client may request via
+-- @RegisterValidate@. A bound outside @[1, maxValidateBound]@ is rejected
+-- with a @RegisterError@ before any spec materialization or apalache
+-- invocation, so a remote client cannot force an unbounded (or
+-- nonsensical) bounded check on the mirror.
+maxValidateBound :: Int
+maxValidateBound = 100
+
+instance Transport t => Step (MkRunValidate t) where
+  exec (MkRunValidate transport cfg bound mSpec)
+    | bound < 1 || bound > maxValidateBound = do
+        let msg = T.pack ("validate bound " ++ show bound
+                          ++ " outside allowed range 1.." ++ show maxValidateBound)
+        sendMsg transport (RegisterError msg)
+        pure [MirrorSendRegisterError msg]
+    | otherwise =
+        withSpecDir transport mSpec cfg $ \cfg' ->
+          withSessionDir $ \sessionDir -> do
+            res <- validateSpecIn (Just sessionDir) cfg' bound
+            case res of
+              Left err -> do
+                sendMsg transport (RegisterError (unApalacheError err))
+                pure [MirrorSendRegisterError (unApalacheError err)]
+              Right v -> do
+                sendMsg transport (SpecValidated v)
+                pure [case v of
+                        SpecValid     -> MirrorSendSpecValidatedValid
+                        SpecInvalid e -> MirrorSendSpecValidatedInvalid e]
 
 instance Transport t => Step (MkExploreMirror t) where
   exec (MkExploreMirror transport spec invs exports maxSteps) =
@@ -524,6 +562,9 @@ runMirrorExplore transport spec invs exports maxSteps =
 runMirrorExploreSession :: Transport t => t -> ApalacheSpec -> [Text] -> [Text] -> IO [MirrorStep]
 runMirrorExploreSession transport spec invs exports =
   exec (MkExploreSession transport spec invs exports)
+
+runMirrorValidate :: Transport t => t -> ApalacheConfig -> Int -> Maybe ApalacheSpec -> IO [MirrorStep]
+runMirrorValidate transport cfg bound mSpec = exec (MkRunValidate transport cfg bound mSpec)
 
 run :: Transport t => t -> IO [MirrorStep]
 run = exec . RecvMsg

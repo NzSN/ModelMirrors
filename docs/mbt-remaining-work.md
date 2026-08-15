@@ -5,11 +5,26 @@ All items complete as of this update (see `specs/MirrorProtocol.tla`,
 `specs/traces/`, `test/MirrorProtocolSpec.hs`).
 
 Done: protocol model fixed (dead `PROTOCOL_ERROR` path removed,
-`MirrorSendSpecValidatedInvalid` removed, report action split into
-`MirrorRecvReportOk`/`AllDone`/`Mismatch`, explicit `Halt`,
-`ClientNeverStuck` invariant, `ProjectAction`/`ProjectTrace` projection),
-witness traces exported for all flows, `testMbtMirrorProtocol` conformance
-driver green (protocol-shape comparison).
+`MirrorSendSpecValidatedInvalid` removed then re-added for the validate-only
+flow, report action split into `MirrorRecvReportOk`/`AllDone`/`Mismatch`,
+explicit `Halt`, `ClientNeverStuck` invariant,
+`ProjectAction`/`ProjectTrace` projection), witness traces exported for all
+flows, `testMbtMirrorProtocol` conformance driver green (protocol-shape
+comparison).
+
+Validate-only path: implemented (see `docs/remote-validation.md`). The model
+now includes `ClientRegisterValidate → MirrorRecvRegisterValidate →
+MirrorSendSpecValidated{Valid,Invalid}` (hence the re-added action above); the
+code-side `register_validate` flow, `runClientValidate`, and the
+`ModelMirrors validate` CLI are in place. MBT coverage is done too:
+`testMbtMirrorProtocol` partitions validate traces out of the sample and
+drives them with `checkValidateTraceAgainstMirror` — valid-outcome traces
+against the HourClock fixture, invalid-outcome traces against an inline
+`Inv == FALSE` fixture, asserting the mirror's step trace equals the model's
+mirror-action sequence. Still excluded: `RegisterError`-outcome validate
+traces (infrastructure failures can't be forced deterministically) and
+validate traces in the real-transports MBT test (covered instead by the
+`MainSpec` CLI integration tests over TCP/mTLS).
 
 Completed remaining items:
 
@@ -23,7 +38,7 @@ Completed remaining items:
 2. **Transport coverage** — DONE. `testMbtTransports` runs the MBT driver
    over `stdio` (spawned mirror process), `tcp`, and `tls`
    (`serveTlsConcurrent`), gated behind `MBT_TRANSPORTS` (comma-separated;
-   unset = no-op, so Bazel/default runs skip it).
+   unset = no-op, so default runs skip it).
 3. **Fault injection** — DONE. Channels are multi-element message queues
    (`Seq(Int)`); `specs/MirrorProtocolFaults.tla` adds drop, duplicate,
    and premature-close actions plus a `faulted` flag scoping
@@ -42,10 +57,3 @@ Completed remaining items:
    on `git diff`, then runs `cabal test all`. `testWitnessTracesFixed`
    replays the checked-in traces as fixed regression scenarios (shared
    driver with the freshly-sampled MBT test).
-5. **Bazel build** — DONE. TLS sources live in `src-tls/` (cabal-only);
-   `stubs/` provides Bazel-only stub modules (`Protocol.Transport.Tls`,
-   `TlsTransportSpec`). `bazel build //...` and `bazel test` are green.
-   Also fixed along the way: the Bazel test sandbox needs a locale
-   (`.bazelrc` sets `LANG`/`LC_ALL=C.UTF-8`; without it apalache-mc fails
-   with `Configuration error: Input length = 1`) and `size = "large"` for
-   the ~400s suite; `specs/traces` added to test data.

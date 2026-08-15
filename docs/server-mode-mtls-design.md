@@ -21,7 +21,7 @@ Out of scope (residual risks, handled orthogonally): denial of service on the se
 
 ## Design Choices
 
-- **TLS 1.3 mutual authentication** via the Haskell `tls`, `x509`, and `x509-store` packages — pure Haskell, compatible with plain cabal and the Bazel `stack_snapshot`.
+- **TLS 1.3 mutual authentication** via the Haskell `tls`, `x509`, and `x509-store` packages — pure Haskell, compatible with plain cabal.
 - **Private CA**: one offline CA signs the server certificate and per-client certificates. No public CA involved.
 - **No custom protocol design**: authentication happens entirely inside the TLS handshake. The session protocol after the handshake is byte-for-byte identical to today's; the change is confined to transport setup.
 - **Opt-in**: stdio and `--serve` remain unchanged. mTLS is gated behind `ModelMirrors --server <port> --tls`.
@@ -90,7 +90,7 @@ No auth messages are added to `Protocol.Core` — the `AuthHello`/`AuthReply`/`A
 | `Protocol.Client` | Client entry points accept TLS parameters (CA, client cert/key); `discoverServers` optionally verifies the cert fingerprint in `announce` |
 | `Protocol.Mirror`, `Protocol.Core`, `Protocol.Format.Json` | **Unchanged** |
 | `scripts/gen-certs.sh` (new) | CA + server + client cert generation helper |
-| `.cabal` / Bazel `BUILD` | Add `tls`, `x509`, `x509-store` dependencies (and to `stack_snapshot`) |
+| `.cabal` | Add `tls`, `x509`, `x509-store` dependencies |
 
 ## Compatibility
 

@@ -6,5 +6,6 @@ tags
 .vscode/*
 tagsdb/*
 .cache/*
-bazel-*
-MODULE.bazel.lock
+.cabal-rw/
+.agent-teams/
+tmp/

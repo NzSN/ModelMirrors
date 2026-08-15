@@ -2,7 +2,7 @@
 module MirrorProtocolSpec (spec) where
 
 import Apalache.Command (generateTraces, generateTraceFiles)
-import Apalache.Rpc.Types (mkSpecFromFile)
+import Apalache.Rpc.Types (ApalacheSpec, mkSpecFromFile, mkSpecFromSource)
 import Apalache.Trace (readTrace)
 import Apalache.Types
     ( ApalacheConfig (..)
@@ -10,18 +10,19 @@ import Apalache.Types
     , TraceGenerationConfig (..)
     , TraceGenerationResult (..)
     , TraceState (..)
+    , ValidateResult (..)
     , Value (..)
     )
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.MVar
 import Control.Exception (IOException, SomeException, catch, try)
 import Control.Monad (unless, forM_)
-import Data.Aeson (FromJSON, encode)
+import Data.Aeson (FromJSON, decode, encode)
 import Data.ByteString.Char8 qualified as B8
 import Data.ByteString.Lazy qualified as BL
 import Data.IORef (newIORef, readIORef, writeIORef)
 import System.Timeout (timeout)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, partition)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -44,8 +45,8 @@ import Engine.Types (Step (..))
 import Protocol.Core (ClientMessage (..), MirrorMessage (..))
 import Protocol.Format.Json ()
 import MinimalTraceCheck (normalize)
-import Protocol.Client (Client (..), hourClockClient, runClientWithTraces)
-import Protocol.Mirror (mirrorStepActionName, run, runMirrorWithTraces, runMirrorGenTraces)
+import Protocol.Client (Client (..), hourClockClient, runClientValidate, runClientWithTraces)
+import Protocol.Mirror (MirrorStep (..), maxValidateBound, mirrorStepActionName, run, runMirrorWithTraces, runMirrorGenTraces)
 import Protocol.Transport.Core (Transport (..), recvMsg, sendMsg)
 import Protocol.Transport.Mock (MockTransport, newMockTransport)
 import Protocol.Transport.Tcp (serveTcp, tcpClose, tcpTransport)
@@ -65,7 +66,7 @@ import System.Process
   )
 import TlsTransportSpec (Certs (..), genCerts)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, assertBool, assertFailure)
+import Test.Tasty.HUnit (testCase, assertBool, assertFailure, (@?=))
 
 spec :: TestTree
 spec = testGroup "MirrorProtocolSpec"
@@ -82,6 +83,15 @@ spec = testGroup "MirrorProtocolSpec"
   , testRunMirrorGenTracesWithDest
   , testRunMirrorGenThenReplay
   , testRunMirrorClientReport
+  , testRunMirrorValidate
+  , testRunMirrorValidateInline
+  , testRunMirrorValidateInvalid
+  , testRunMirrorValidateBadInline
+  , testRunMirrorValidateBoundTooHigh
+  , testRunMirrorValidateBoundNonPositive
+  , testRegisterValidateJsonRoundtrip
+  , testRegisterFamilyJsonRoundtrips
+  , testValidateConformanceNames
   ]
 
 hcApalacheCfg :: ApalacheConfig
@@ -293,6 +303,162 @@ driveMirrorTraces clientEnd traces = do
     isStep NextStep{} = True
     isStep _ = False
 
+-- -----------------------------------------------------------------------------
+-- Validate-only path (RegisterValidate)
+-- -----------------------------------------------------------------------------
+
+-- A spec that type-checks but whose invariant is FALSE, so apalache's check
+-- (with @--inv@) finds a violation at any bound and @validateSpecIn@ returns
+-- @SpecInvalid@. Exercises the @--inv@ path added for remote validation.
+invalidSpec :: ApalacheSpec
+invalidSpec = mkSpecFromSource $ T.unlines
+  [ "---------------- MODULE BadInv ---------------------"
+  , "EXTENDS Naturals"
+  , "VARIABLE"
+  , "  \\* @type: Int;"
+  , "  x"
+  , "Init == x = 0"
+  , "Next == x' = x + 1"
+  , "Inv == FALSE"
+  , "======================================================"
+  ]
+
+-- | Fork the mirror on one end of a mock transport and drive the validate-only
+-- path from the other, returning the client's result and the mirror's step
+-- trace (for structural assertions).
+runValidateFlow :: MockTransport -> MockTransport -> ApalacheConfig -> Int -> Maybe ApalacheSpec -> IO (Either Text ValidateResult, Either String [MirrorStep])
+runValidateFlow clientEnd mirrorEnd cfg bound mSpec = do
+  mv <- newEmptyMVar
+  _ <- forkIO $ do
+    result <- try (run mirrorEnd)
+    putMVar mv $ case result of
+      Right stps -> Right stps
+      Left (e :: SomeException) -> Left (show e)
+  clientResult <- runClientValidate clientEnd cfg bound mSpec
+  mSteps <- timeout 180_000_000 (readMVar mv)
+  let mirrorResult = case mSteps of
+        Nothing -> Left "mirror did not complete within timeout"
+        Just r  -> r
+  pure (clientResult, mirrorResult)
+
+testRunMirrorValidate :: TestTree
+testRunMirrorValidate = testCase "validate-only path validates HourClock" $ do
+  (clientEnd, mirrorEnd) <- newMockTransport
+  (clientResult, mirrorResult) <- runValidateFlow clientEnd mirrorEnd hcApalacheCfg 1 Nothing
+  case clientResult of
+    Left e -> assertFailure $ "client validate failed: " ++ T.unpack e
+    Right SpecValid -> pure ()
+    Right (SpecInvalid e) -> assertFailure $ "unexpected SpecInvalid: " ++ T.unpack e
+  case mirrorResult of
+    Left e -> assertFailure e
+    Right [MirrorRecvRegisterValidate{}, MirrorSendSpecValidatedValid] -> pure ()
+    Right steps -> assertFailure $ "unexpected steps: " ++ show (map mirrorStepActionName steps)
+
+testRunMirrorValidateInline :: TestTree
+testRunMirrorValidateInline = testCase "validate-only path validates an inline spec" $ do
+  inlineSpec <- mkSpecFromFile "test/specs/HourClock.tla"
+  (clientEnd, mirrorEnd) <- newMockTransport
+  (clientResult, mirrorResult) <- runValidateFlow clientEnd mirrorEnd hcApalacheCfg 1 (Just inlineSpec)
+  case clientResult of
+    Left e -> assertFailure $ "client validate failed: " ++ T.unpack e
+    Right SpecValid -> pure ()
+    Right (SpecInvalid e) -> assertFailure $ "unexpected SpecInvalid: " ++ T.unpack e
+  case mirrorResult of
+    Left e -> assertFailure e
+    Right [MirrorRecvRegisterValidate{}, MirrorSendSpecValidatedValid] -> pure ()
+    Right steps -> assertFailure $ "unexpected steps: " ++ show (map mirrorStepActionName steps)
+
+testRunMirrorValidateInvalid :: TestTree
+testRunMirrorValidateInvalid = testCase "validate-only path reports SpecInvalid for a violated invariant" $ do
+  (clientEnd, mirrorEnd) <- newMockTransport
+  let cfg = hcApalacheCfg { invariant = T.pack "Inv" }
+  (clientResult, mirrorResult) <- runValidateFlow clientEnd mirrorEnd cfg 1 (Just invalidSpec)
+  case clientResult of
+    Right (SpecInvalid _) -> pure ()
+    Right SpecValid -> assertFailure "expected invalid spec to fail, but mirror reported valid"
+    Left e -> assertFailure $ "expected SpecInvalid, got infrastructure error: " ++ T.unpack e
+  case mirrorResult of
+    Left e -> assertFailure e
+    Right [MirrorRecvRegisterValidate{}, MirrorSendSpecValidatedInvalid{}] -> pure ()
+    Right steps -> assertFailure $ "unexpected steps: " ++ show (map mirrorStepActionName steps)
+
+testRunMirrorValidateBadInline :: TestTree
+testRunMirrorValidateBadInline = testCase "validate-only path rejects an unparseable inline spec" $ do
+  let badSpec = mkSpecFromSource "not a TLA module"
+  (clientEnd, mirrorEnd) <- newMockTransport
+  (clientResult, mirrorResult) <- runValidateFlow clientEnd mirrorEnd hcApalacheCfg 1 (Just badSpec)
+  case clientResult of
+    Left _ -> pure ()  -- RegisterError surfaces as Left (infrastructure tier)
+    Right _ -> assertFailure "expected RegisterError, but client succeeded"
+  case mirrorResult of
+    Left e -> assertFailure e
+    Right [MirrorRecvRegisterValidate{}, MirrorSendRegisterError{}] -> pure ()
+    Right steps -> assertFailure $ "unexpected steps: " ++ show (map mirrorStepActionName steps)
+
+-- | The mirror rejects a client-requested bound above the server-side cap
+-- (REJECT, not clamp): the rejection must happen before any spec
+-- materialization or apalache run, so the only observable protocol
+-- traffic is RegisterError.
+testRunMirrorValidateBoundTooHigh :: TestTree
+testRunMirrorValidateBoundTooHigh = testCase "validate-only path rejects a bound above maxValidateBound" $ do
+  (clientEnd, mirrorEnd) <- newMockTransport
+  (clientResult, mirrorResult) <- runValidateFlow clientEnd mirrorEnd hcApalacheCfg (maxValidateBound + 1) Nothing
+  case clientResult of
+    Left _ -> pure ()  -- RegisterError surfaces as Left (infrastructure tier)
+    Right _ -> assertFailure "expected RegisterError, but client succeeded"
+  case mirrorResult of
+    Left e -> assertFailure e
+    Right [MirrorRecvRegisterValidate{}, MirrorSendRegisterError{}] -> pure ()
+    Right steps -> assertFailure $ "unexpected steps: " ++ show (map mirrorStepActionName steps)
+
+-- | Bounds below 1 are equally nonsensical (apalache would fail or misbehave
+-- on @--length=0@), so the same server-side rejection applies.
+testRunMirrorValidateBoundNonPositive :: TestTree
+testRunMirrorValidateBoundNonPositive = testCase "validate-only path rejects a non-positive bound" $ do
+  (clientEnd, mirrorEnd) <- newMockTransport
+  (clientResult, mirrorResult) <- runValidateFlow clientEnd mirrorEnd hcApalacheCfg 0 Nothing
+  case clientResult of
+    Left _ -> pure ()  -- RegisterError surfaces as Left (infrastructure tier)
+    Right _ -> assertFailure "expected RegisterError, but client succeeded"
+  case mirrorResult of
+    Left e -> assertFailure e
+    Right [MirrorRecvRegisterValidate{}, MirrorSendRegisterError{}] -> pure ()
+    Right steps -> assertFailure $ "unexpected steps: " ++ show (map mirrorStepActionName steps)
+
+
+testRegisterValidateJsonRoundtrip :: TestTree
+testRegisterValidateJsonRoundtrip = testCase "register_validate JSON roundtrip" $ do
+  let noSpec :: ClientMessage
+      noSpec = RegisterValidate hcApalacheCfg 7 Nothing
+  decode (encode noSpec) @?= Just noSpec
+  inlineSpec <- mkSpecFromFile "test/specs/HourClock.tla"
+  let withSpec :: ClientMessage
+      withSpec = RegisterValidate hcApalacheCfg 7 (Just inlineSpec)
+  decode (encode withSpec) @?= Just withSpec
+
+-- | JSON roundtrips for the whole @Register*@ family, so @register_validate@
+-- sits alongside the other registration messages.
+testRegisterFamilyJsonRoundtrips :: TestTree
+testRegisterFamilyJsonRoundtrips = testCase "register* messages JSON roundtrip" $ do
+  let mSpec = mkSpecFromSource "---- MODULE M ----"
+      msgs :: [ClientMessage]
+      msgs =
+        [ Register hcApalacheCfg hcTraceConfig Nothing
+        , Register hcApalacheCfg hcTraceConfig (Just mSpec)
+        , RegisterTraces hcApalacheCfg ["a.itf.json", "b.itf.json"]
+        , RegisterGenTraces hcApalacheCfg hcTraceConfig (Just "dest") Nothing
+        , RegisterGenTraces hcApalacheCfg hcTraceConfig Nothing (Just mSpec)
+        , RegisterExplore mSpec [] [] 10
+        , RegisterExploreSession mSpec [] []
+        ]
+  mapM_ (\m -> decode (encode m) @?= Just m) msgs
+
+testValidateConformanceNames :: TestTree
+testValidateConformanceNames = testCase "validate step action names match the TLA model" $ do
+  mirrorStepActionName (MirrorRecvRegisterValidate hcApalacheCfg 1 Nothing) @?= T.pack "MirrorRecvRegisterValidate"
+  mirrorStepActionName MirrorSendSpecValidatedValid @?= T.pack "MirrorSendSpecValidatedValid"
+  mirrorStepActionName (MirrorSendSpecValidatedInvalid (T.pack "x")) @?= T.pack "MirrorSendSpecValidatedInvalid"
+
 testProtocolTraceGenerated :: TestTree
 testProtocolTraceGenerated = testCase "MirrorProtocolServer generates traces" $ do
   let cfg = ApalacheConfig
@@ -358,19 +524,57 @@ testMbtMirrorProtocol = testCase "mbt: mirror follows all protocol flows" $ do
   traces <- generateMirrorTraces
   assertBool "at least one trace generated" (not (null traces))
 
-  let applicable = filter (\t ->
-        let acts = map actionTake (traceStates t)
-        in not (any (`elem` [T.pack "ClientRegisterGenTraces"
-                            ,T.pack "ClientRegisterExplore"
-                            ,T.pack "ClientRegisterExploreSession"
-                            ,T.pack "ClientRegisterValidate"
-                            ,T.pack "ClientRecvRegisterError"
-                            ,T.pack "MirrorSendRegisterError"
-                            ]) acts)
-        ) traces
+  -- Validate traces are driven separately (checkValidateTraceAgainstMirror);
+  -- RegisterError-outcome traces stay excluded: infrastructure failures
+  -- can't be forced deterministically from the client side.
+  let excluded = [T.pack "ClientRegisterGenTraces"
+                 ,T.pack "ClientRegisterExplore"
+                 ,T.pack "ClientRegisterExploreSession"
+                 ,T.pack "ClientRecvRegisterError"
+                 ,T.pack "MirrorSendRegisterError"
+                 ]
+      actsOf t = map actionTake (traceStates t)
+      applicable = filter (\t -> not (any (`elem` excluded) (actsOf t))) traces
+      (validateTraces, mirrorTraces) =
+        partition (\t -> T.pack "ClientRegisterValidate" `elem` actsOf t) applicable
   assertBool "at least one applicable trace" (not (null applicable))
 
-  forM_ applicable $ checkTraceAgainstMirror hcTracePaths
+  forM_ mirrorTraces $ checkTraceAgainstMirror hcTracePaths
+  forM_ validateTraces checkValidateTraceAgainstMirror
+
+-- | Replay one validate-only model trace against the real mirror (mock
+-- transport), then compare the mirror's step trace against the model's
+-- mirror-action sequence. The model chooses the verdict nondeterministically,
+-- so the fixture follows the trace: valid-outcome traces are driven against
+-- HourClock (always valid), invalid-outcome traces against the inline
+-- 'invalidSpec' (@Inv == FALSE@, invalid at any bound).
+checkValidateTraceAgainstMirror :: ItfTrace -> IO ()
+checkValidateTraceAgainstMirror trace = do
+  let expectedMirror = [ actionTake s
+                       | s <- drop 1 (traceStates trace)
+                       , T.pack "Mirror" `T.isPrefixOf` actionTake s
+                       ]
+      expectInvalid = T.pack "MirrorSendSpecValidatedInvalid" `elem` expectedMirror
+      (cfg, mSpec)
+        | expectInvalid = (hcApalacheCfg { invariant = T.pack "Inv" }, Just invalidSpec)
+        | otherwise     = (hcApalacheCfg, Nothing)
+  (clientEnd, mirrorEnd) <- newMockTransport
+  (clientResult, mirrorResult) <- runValidateFlow clientEnd mirrorEnd cfg 1 mSpec
+  case (expectInvalid, clientResult) of
+    (False, Right SpecValid)        -> pure ()
+    (True, Right (SpecInvalid _))   -> pure ()
+    _ -> assertFailure $ "validate client result mismatch (expected "
+                          ++ (if expectInvalid then "invalid" else "valid")
+                          ++ "): " ++ show clientResult
+  case mirrorResult of
+    Left e -> assertFailure e
+    Right steps ->
+      unless (map mirrorStepActionName steps == expectedMirror) $
+        assertFailure $ unlines
+          [ "validate protocol trace mismatch:"
+          , "  spec: " ++ show expectedMirror
+          , "  impl: " ++ show (map mirrorStepActionName steps)
+          ]
 
 -- | Replay one model trace against the real mirror (mock transport),
 -- following its report_matches guidance, then compare protocol structure
@@ -658,6 +862,9 @@ testMbtTransports = testCase "mbt over stdio/tcp/tls (MBT_TRANSPORTS)" $ do
         Right (_, ps) -> pure (take 1 ps)
         Left err -> assertFailure $ "pre-generate traces error: " ++ show err
       traces <- generateMirrorTraces
+      -- ClientRegisterValidate stays excluded here: validate-only over real
+      -- transports is covered by the MainSpec CLI integration tests; the
+      -- mock-transport MBT (testMbtMirrorProtocol) drives validate traces.
       let applicable = filter (\t ->
             let acts = map actionTake (traceStates t)
             in not (any (`elem` [T.pack "ClientRegisterGenTraces"

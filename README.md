@@ -99,22 +99,32 @@ Client                Mirror
 Commands and replies strictly alternate. A `protocol_error` rejects the
 command but the **session stays open**.
 
+### `register_validate` — validate only, no stepping
+
+```
+Client                Mirror
+  | - register_validate ------> |
+  |                             | -- typecheck + bounded check
+  | <-- spec_validated -------- |   (valid or invalid: session ends either way)
+```
+
+Exactly one reply: `spec_validated` (verdict) or `register_error`
+(infrastructure). The mirror caps the accepted bound at
+`maxValidateBound` (100); out-of-range bounds get `register_error`.
+
 ## Quick Start
 
 ### Prerequisites
 
 - GHC 9.10+
 - [apalache-mc](https://github.com/apalache-mc/apalache) on `PATH`
-- cabal (or Bazel 9.1.0)
+- cabal
 
 ### Build
 
 ```sh
-cabal build all        # or: bazel build //...
+cabal build all
 ```
-
-Note: the mTLS server mode (`tls`/`crypton` dependencies) builds with cabal
-only; the Bazel build covers the rest of the package (see `AGENTS.md`).
 
 ### Run the mirror
 
@@ -136,7 +146,7 @@ echo '{"proto_step":"register","apalacheConfig":{"specPath":"test/specs/HourCloc
 ### Run tests
 
 ```sh
-cabal test all                       # or: bazel test //test:ModelMirrors-test
+cabal test all
 ```
 
 Tests include integration tests that invoke `apalache-mc` (CLI and explorer
@@ -156,6 +166,7 @@ All messages are single-line JSON objects tagged by `"proto_step"`.
 | `register_trace_gen` | `apalacheConfig`, `traceConfig`, `destPath?`, `spec?` | Generate trace files only |
 | `register_explore` | `spec`, `invariants`, `exports`, `maxSteps?` | Mirror-driven symbolic exploration + conformance |
 | `register_explore_session` | `spec`, `invariants`, `exports` | Open a client-driven explorer session |
+| `register_validate` | `apalacheConfig`, `bound`, `spec?` | Validate only (typecheck + bounded check); one reply, session ends |
 | `report_state` | `state` | Client's actual state after a step |
 | `explore_assume_transition` | `transitionId` | Session command: prepare a transition |
 | `explore_next_step` | — | Session command: advance one step |
@@ -189,7 +200,7 @@ order matters: **`sources[0]` is the root module**, the rest are dependencies.
 
 | `proto_step` | Fields | Description |
 |---|---|---|
-| `spec_validated` | `result`: `"valid"` \| `{invalid}` | Spec accepted; stepping begins |
+| `spec_validated` | `result`: `"valid"` \| `{invalid}` | Validation verdict; stepping begins for `register`/`register_explore`, session ends for `register_validate` |
 | `initial_state` | `action`, `state` | First expected state |
 | `next_step` | `action`, `parameters` | Next expected step |
 | `step_ok` | — | Reported state matched |
@@ -265,6 +276,32 @@ location — authentication always happens in the mTLS handshake, so a
 compromised registry cannot impersonate a server. See
 `docs/server-mode-registry-design.md`.
 
+## Remote validation
+
+`ModelMirrors validate` is a one-shot client for the validate-only path: it
+reads a spec (plus its `EXTENDS` dependencies) from the local filesystem, sends
+them **inline** to a remote mirror, prints the verdict, and exits with a code
+CI can branch on. The server never sees the client's filesystem.
+
+```sh
+ModelMirrors validate --host H --port P --spec Spec.tla [--dep D.tla]... [--bound N] [--inv I] [--init P] [--next P] [--cinit C] [--tls --cert C --key K --ca CA] [--pin SHA256]
+```
+
+| Exit | Meaning | Output |
+|---|---|---|
+| 0 | spec valid | `VALID` on stdout |
+| 1 | spec invalid | `INVALID` + apalache output on stdout |
+| 2 | infrastructure error (transport / `register_error` / `protocol_error`) | error text on stderr |
+
+The spec travels inline (`ApalacheSpec` sources), so the mirror materializes it
+to a temp dir and needs no access to the client's filesystem. `--bound` (default
+10) is the check length; `--inv` selects the invariant to check (empty =
+typecheck + deadlock-freedom only). For `--tls`, generate credentials with
+`scripts/gen-certs.sh` (see "Secure server mode"); `--pin` additionally verifies
+the server certificate fingerprint (`--pin` requires `--tls`). The mirror caps
+the accepted bound at `maxValidateBound` (100); an out-of-range bound gets
+`register_error` (exit 2).
+
 ## Process model
 
 The mirror is a **single OS process** that spawns `apalache-mc` child
@@ -334,10 +371,13 @@ A client in any language must:
    registry first). For mTLS + registry, follow the language-agnostic
    procedure in `docs/protocol-spec.md` ("Discovery and mTLS (Client Guide)").
 2. Send one registration message (`register`, `register_traces`,
-   `register_trace_gen`, `register_explore`, or `register_explore_session`).
+   `register_trace_gen`, `register_explore`, `register_explore_session`,
+   or `register_validate`).
 3. For stepping flows: wait for `spec_validated`, then answer each
    `initial_state`/`next_step` with `report_state`; handle `step_ok` /
-   `step_mismatch`; finish at `all_steps_done`.
+   `step_mismatch`; finish at `all_steps_done`. For `register_validate`:
+   read exactly one reply (`spec_validated` or `register_error`) — the
+   session ends there.
 4. For explorer sessions: wait for `explorer_ready`, then alternate
    `explore_*` commands with their replies; finish with `explore_done`.
 
@@ -420,8 +460,8 @@ ModelMirrors/
 ├── specs/            Protocol specifications (TLA+)
 ├── scripts/          gen-certs.sh (mTLS CA + cert generation)
 ├── docs/             Design documents
-├── ModelMirrors.cabal
-└── BUILD.bazel
+├── src-tls/          CABAL-only TLS modules (hs-source-dirs)
+└── ModelMirrors.cabal
 ```
 
 ### Key Modules
@@ -445,6 +485,7 @@ ModelMirrors/
 | `Protocol.Transport.Tls` | TLS 1.3 mutual-auth transport: `serveTls`, `connectTls`, `connectTlsPinned`, cert fingerprints, expiry warnings |
 | `Protocol.Registry` | Consul HTTP API client: service registration, TTL heartbeat, discovery |
 | `Protocol.Client` | Reference client with canned/fixed/hourClock impl |
+| `Protocol.ValidateOpts` | Hand-rolled option parser for the `validate` CLI subcommand |
 | `Protocol.Mirror` | Mirror flows: replay, explore, sessions, `run` |
 | `MinimalTraceCheck` | Normalize and compare MirrorStep sequences |
 

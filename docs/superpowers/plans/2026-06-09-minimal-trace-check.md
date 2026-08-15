@@ -310,19 +310,3 @@ git commit -m "test: register MinimalTraceCheck tests"
 ```
 
 ---
-
-### Task 5: Verify Bazel build
-
-**Files:** (none to modify — Bazel uses globs)
-
-- [ ] **Step 1: Build with Bazel**
-
-Run: `bazel build //...`
-Expected: Builds without errors.
-
-- [ ] **Step 2: Run tests with Bazel**
-
-Run: `bazel test //test:ModelMirrors-test`
-Expected: Tests pass.
-
----
