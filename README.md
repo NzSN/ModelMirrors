@@ -133,15 +133,23 @@ Exactly one reply: `spec_validated` (verdict) or `register_error`
 cabal build all
 ```
 
-### Run the mirror
+### Command-line tools
+
+The build produces a single executable, `ModelMirrors`, with four modes —
+three mirror roles and one client role:
+
+| Command | Role | Description |
+|---|---|---|
+| `ModelMirrors` | stdio mirror | Speaks one protocol session on stdin/stdout, newline-delimited JSON, then exits. For embedding the mirror in a client process. |
+| `ModelMirrors --serve <port>` | TCP daemon | Accepts TCP connections and speaks one session per connection (sequential accept loop). Client drops are logged and survived. |
+| `ModelMirrors --server <port> --tls --cert C --key K --ca CA [--registry URL] [--jobs N]` | mTLS daemon | TLS 1.3 with mutual authentication (client certs required). `--jobs N` (default 4) enables a bounded concurrent dispatcher with per-session apalache isolation; `--registry URL` registers with a Consul registry and keeps a 10s TTL heartbeat. See "Secure server mode". |
+| `ModelMirrors validate --host H --port P --spec S.tla [--dep D.tla]... [--bound N] [--inv I] [--init P] [--next P] [--cinit C] [--tls --cert C --key K --ca CA] [--pin SHA256]` | validate client | Sends a spec (plus deps, inline) to a remote mirror for typecheck + bounded model check, prints the verdict, exits 0 (`VALID`) / 1 (`INVALID`) / 2 (infrastructure error). See "Remote validation". |
 
 ```sh
 cabal run ModelMirrors                 # stdio mirror (one session)
-cabal run ModelMirrors -- --serve 8823 # TCP daemon: one session per
-                                       # connection, sequential accept loop
-# mTLS daemon (see "Secure server mode" below):
-ModelMirrors --server 8823 --tls --cert certs/server.crt \
-    --key certs/server.key --ca certs/ca.crt
+cabal run ModelMirrors -- --serve 8823 # TCP daemon
+cabal run ModelMirrors -- validate --host 127.0.0.1 --port 8823 \
+       --spec test/specs/HourClock.tla     # validate client (args after --)
 ```
 
 Example: pipe a `register` message to the stdio mirror:
