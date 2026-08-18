@@ -5,6 +5,7 @@ module Protocol.Transport.Tcp
   , tcpClose
   , serveTcp
   , serveTcpConcurrent
+  , pickListenerAddr
   ) where
 
 import Control.Concurrent (forkIO, newQSem, signalQSem, waitQSem)
@@ -15,6 +16,7 @@ import Data.ByteString.Char8 qualified as B8
 import Network.Socket
   ( AddrInfo (..)
   , AddrInfoFlag (..)
+  , Family (AF_INET)
   , HostName
   , PortNumber
   , Socket
@@ -54,6 +56,17 @@ tcpTransport sock = TcpTransport <$> socketToHandle sock ReadWriteMode
 tcpClose :: TcpTransport -> IO ()
 tcpClose (TcpTransport h) = hClose h
 
+-- | Pick the listener address from 'getAddrInfo' results, preferring IPv4.
+-- On Windows, @AI_PASSIVE@ resolves the IPv6 wildcard first and the socket
+-- would be IPv6-only (refusing IPv4 clients); on POSIX the IPv4 wildcard
+-- already comes first, so this is a no-op in practice.
+pickListenerAddr :: [AddrInfo] -> AddrInfo
+pickListenerAddr addrs = case filter ((== AF_INET) . addrFamily) addrs of
+  (a : _) -> a
+  []      -> case addrs of
+    (a : _) -> a
+    []      -> error "pickListenerAddr: no addresses"
+
 -- | Connect to a mirror server over plain TCP and return a ready transport
 -- (the client-side counterpart of 'serveTcp'/'serveTcpConcurrent').
 connectTcp :: HostName -> PortNumber -> IO TcpTransport
@@ -81,7 +94,7 @@ serveTcp port = withSocketsDo $ do
   addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) Nothing (Just (show port))
   case addrs of
     [] -> error ("serveTcp: cannot resolve port " ++ show port)
-    (addr : _) -> bracket (openListener addr) close $ \lsock -> forever $ do
+    _  -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
       (conn, _) <- accept lsock
       t <- tcpTransport conn
       r <- try (run t)
@@ -107,7 +120,7 @@ serveTcpConcurrent jobs port = withSocketsDo $ do
   addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) Nothing (Just (show port))
   case addrs of
     [] -> error ("serveTcpConcurrent: cannot resolve port " ++ show port)
-    (addr : _) -> bracket (openListener addr) close $ \lsock -> forever $ do
+    _  -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
       (conn, _) <- accept lsock
       waitQSem sem
       _ <- forkIO $ do

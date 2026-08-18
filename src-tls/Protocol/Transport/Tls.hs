@@ -12,12 +12,19 @@ module Protocol.Transport.Tls
   , peerCertFingerprintSHA256
   ) where
 
-import Control.Concurrent (forkIO, newQSem, signalQSem, waitQSem)
+import Control.Concurrent (forkIO, newQSem, signalQSem, threadDelay, waitQSem)
 import Control.Exception (SomeException, bracket, bracketOnError, catch, try)
-import Control.Monad (forever)
+import Control.Monad (forever, when)
+import System.Environment (lookupEnv)
+import System.IO.Unsafe (unsafePerformIO)
+#ifndef mingw32_HOST_OS
 import Data.Bits ((.&.))
+#endif
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as B8
+#ifdef mingw32_HOST_OS
+import Data.Word (Word8)
+#endif
 import Data.ByteString.Lazy qualified as LBS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Hourglass (Elapsed (..), Seconds (..), timeConvert)
@@ -40,7 +47,10 @@ import Network.Socket
   , socket
   , withSocketsDo
   )
-import Network.Socket.ByteString qualified as NSB
+#ifdef mingw32_HOST_OS
+import Network.Socket (mkSocket, socketToHandle, touchSocket, unsafeFdSocket)
+#endif
+import qualified Network.Socket.ByteString as NBS
 import Network.TLS
   ( Backend (..)
   , CertificateChain (..)
@@ -73,8 +83,14 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Protocol.Mirror (run)
 import Protocol.Transport.Core (Transport (..))
-import System.IO (hPrint, hPutStrLn, stderr)
+import Protocol.Transport.Tcp (pickListenerAddr)
+import System.IO (hFlush, hPrint, hPutStrLn, stderr)
+#ifdef mingw32_HOST_OS
+import System.IO (BufferMode (NoBuffering), Handle, IOMode (..), hClose, hSetBuffering)
+#endif
+#ifndef mingw32_HOST_OS
 import System.Posix.Files (fileMode, getFileStatus)
+#endif
 
 data TlsTransport = TlsTransport Context (IORef BS.ByteString)
 
@@ -88,13 +104,17 @@ tlsClose :: TlsTransport -> IO ()
 tlsClose (TlsTransport ctx _) = bye ctx `catch` \(_ :: SomeException) -> pure ()
 
 instance Transport TlsTransport where
-  send (TlsTransport ctx _) bs = sendData ctx (LBS.fromStrict (B8.snoc bs '\n'))
+  send (TlsTransport ctx _) bs = do
+    when tlsRxDebug (dbgLn ("TXPLAIN " ++ show (BS.length bs) ++ " " ++ B8.unpack (B8.take 90 bs)))
+    sendData ctx (LBS.fromStrict (B8.snoc bs '\n'))
   recv t@(TlsTransport ctx ref) = do
     buf <- readIORef ref
     case B8.elemIndex '\n' buf of
       Just i -> do
+        let line = BS.take i buf
+        when tlsRxDebug (dbgLn ("RXPLAIN " ++ show (BS.length line) ++ " " ++ B8.unpack (B8.take 90 line)))
         writeIORef ref (BS.drop (i + 1) buf)
-        pure (BS.take i buf)
+        pure line
       Nothing -> do
         chunk <- recvData ctx
         if BS.null chunk
@@ -108,10 +128,12 @@ instance Transport TlsTransport where
 mkServerParams :: FilePath -> FilePath -> FilePath -> IO ServerParams
 mkServerParams certFile keyFile caFile = do
   warnIfNearExpiry "server" certFile
+#ifndef mingw32_HOST_OS
   mode <- fileMode <$> getFileStatus keyFile
   if mode .&. 0o077 /= 0
     then ioError (userError ("mkServerParams: key file " ++ keyFile ++ " must not be accessible by group/other (chmod 0600)"))
     else pure ()
+#endif
   credResult <- credentialLoadX509 certFile keyFile
   cred <- either (ioError . userError . ("mkServerParams: cannot load credentials: " ++)) pure credResult
   mStore <- readCertificateStore caFile
@@ -127,6 +149,9 @@ mkServerParams certFile keyFile caFile = do
         }
     , serverHooks = (serverHooks defaultParamsServer)
         { onClientCertificate = validateClientCertificate caStore defaultValidationCache
+        -- Require a client certificate: reject handshakes where the
+        -- client presents none (default allows unverified clients through).
+        , onUnverifiedClientCert = pure False
         }
     }
 
@@ -138,10 +163,12 @@ mkServerParams certFile keyFile caFile = do
 mkClientParams :: HostName -> FilePath -> FilePath -> FilePath -> IO ClientParams
 mkClientParams host certFile keyFile caFile = do
   warnIfNearExpiry "client" certFile
+#ifndef mingw32_HOST_OS
   mode <- fileMode <$> getFileStatus keyFile
   if mode .&. 0o077 /= 0
     then ioError (userError ("mkClientParams: key file " ++ keyFile ++ " must not be accessible by group/other (chmod 0600)"))
     else pure ()
+#endif
   credResult <- credentialLoadX509 certFile keyFile
   cred <- either (ioError . userError . ("mkClientParams: cannot load credentials: " ++)) pure credResult
   mStore <- readCertificateStore caFile
@@ -167,9 +194,10 @@ connectTls params host port = withSocketsDo $ do
   case addrs of
     [] -> ioError (userError ("connectTls: cannot resolve " ++ host ++ ":" ++ show port))
     (addr : _) -> bracketOnError (openConn addr) close $ \sock -> do
-      ctx <- contextNew (socketBackend sock) params
-      handshake ctx
-      tlsTransport ctx
+      bracketOnError (mkTlsBackend sock) backendClose $ \backend -> do
+        ctx <- contextNew backend params
+        handshake ctx
+        tlsTransport ctx
   where
     openConn addr = do
       s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
@@ -210,6 +238,32 @@ warnIfNearExpiry label certFile = do
         ++ (if days < 0 then " is expired" else " expires in " ++ show days ++ " day(s)"))
     _ -> pure ()
 
+-- | Debug switch. With @MODELMIRRORS_DEBUG_TLS=1@, the Transport
+-- instance logs plaintext lines (TXPLAIN/RXPLAIN); on Windows the TLS
+-- backend also hex-dumps every backend read (TLSRX) and write (TLSTX).
+tlsRxDebug :: Bool
+tlsRxDebug = unsafePerformIO $ (== Just "1") <$> lookupEnv "MODELMIRRORS_DEBUG_TLS"
+{-# NOINLINE tlsRxDebug #-}
+#ifdef mingw32_HOST_OS
+tlsTxDebug :: Bool
+tlsTxDebug = unsafePerformIO $ (== Just "1") <$> lookupEnv "MODELMIRRORS_DEBUG_TLS"
+{-# NOINLINE tlsTxDebug #-}
+#endif
+
+-- | Debug output helper: line + flush (stderr is block-buffered when
+-- redirected, which would otherwise swallow the dumps on long-running
+-- processes).
+dbgLn :: String -> IO ()
+dbgLn s = hPutStrLn stderr s >> hFlush stderr
+
+#ifdef mingw32_HOST_OS
+hexDump :: Int -> BS.ByteString -> String
+hexDump lim bs = take (lim * 3) (concatMap (\b -> printfHex b ++ " ") (BS.unpack (BS.take lim bs)))
+  where
+    printfHex :: Word8 -> String
+    printfHex b = let h = "0123456789abcdef" in [h !! fromIntegral (b `div` 16), h !! fromIntegral (b `mod` 16)]
+#endif
+
 -- | SHA-256 fingerprint of the peer's leaf certificate on an
 -- established connection. 'Nothing' if the peer presented no
 -- certificate.
@@ -232,13 +286,67 @@ connectTlsPinned params host port expectedFp = do
     then pure t
     else ioError (userError ("connectTlsPinned: certificate fingerprint mismatch for " ++ host ++ ":" ++ show port))
 
-socketBackend :: Socket -> Backend
-socketBackend sock = Backend
+-- | Build the TLS backend for an already-connected 'Socket'.
+--
+-- On Windows, GHC's Handle write path silently drops the first
+-- application-data record after the TLS 1.3 handshake (the 'BS.hPut'
+-- + 'hFlush' completes but the bytes never reach the peer), while raw
+-- 'NBS.sendAll' delivers reliably.  Reads still go through the Handle
+-- (GHC's IO-manager ReadFile path) to avoid the intermittent @WSAEINVAL@
+-- that raw 'recv' on Windows can raise.  The 'Socket' is reconstructed
+-- from the FD via 'mkSocket' after 'socketToHandle' has invalidated the
+-- original; 'touchSocket' keeps the original alive so the FD is not
+-- prematurely closed.
+--
+-- On POSIX the plain single-socket backend is used (the pre-dual-backend
+-- behaviour); the backend-level hexdump debug switches are therefore not
+-- available there.
+mkTlsBackend :: Socket -> IO Backend
+#ifdef mingw32_HOST_OS
+mkTlsBackend sock = do
+  fd <- unsafeFdSocket sock
+  bracketOnError (socketToHandle sock ReadWriteMode) hClose $ \h -> do
+    hSetBuffering h NoBuffering
+    writeSock <- mkSocket fd
+    touchSocket sock
+    pure (tlsBackend writeSock h)
+#else
+mkTlsBackend sock = pure Backend
   { backendFlush = pure ()
   , backendClose = close sock
-  , backendSend = NSB.sendAll sock
-  , backendRecv = NSB.recv sock
+  , backendSend = NBS.sendAll sock
+  , backendRecv = NBS.recv sock
   }
+#endif
+
+#ifdef mingw32_HOST_OS
+-- | Dual backend over a raw 'Socket' (writes) and a 'Handle' (reads).
+-- See 'mkTlsBackend' for why this split exists on Windows only.
+tlsBackend :: Socket -> Handle -> Backend
+tlsBackend writeSock h = Backend
+  { backendFlush = pure ()
+  , backendClose = hClose h
+  , backendSend = \bs -> do
+      when tlsTxDebug (dbgLn ("TLSTX " ++ show (BS.length bs) ++ " " ++ hexDump 48 bs))
+      NBS.sendAll writeSock bs
+      when tlsTxDebug (dbgLn ("TLSTX_DONE " ++ show (BS.length bs)))
+  , backendRecv = recvAll h
+  }
+  where
+    recvAll hnd n = do
+      chunks <- loop n []
+      let bs = BS.concat (reverse chunks)
+      when tlsRxDebug $
+        dbgLn ("TLSRX req=" ++ show n ++ " got=" ++ show (BS.length bs) ++ " hex=" ++ hexDump 80 bs)
+      pure bs
+      where
+        loop 0 acc = pure acc
+        loop left acc = do
+          r <- BS.hGet hnd left
+          if BS.null r
+            then pure acc
+            else loop (left - BS.length r) (r : acc)
+#endif
 
 -- | Like 'serveTcp', but each accepted connection is upgraded to a
 -- mutually-authenticated TLS 1.3 session before entering the protocol
@@ -250,18 +358,19 @@ serveTls params port = withSocketsDo $ do
   addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) Nothing (Just (show port))
   case addrs of
     [] -> error ("serveTls: cannot resolve port " ++ show port)
-    (addr : _) -> bracket (openListener addr) close $ \lsock -> forever $ do
+    _ -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
       (conn, _) <- accept lsock
-      r <- try $ do
-        ctx <- contextNew (socketBackend conn) params
+      r <- try $ bracket (mkTlsBackend conn) backendClose $ \b -> do
+        ctx <- contextNew b params
         handshake ctx
         t <- tlsTransport ctx
         _ <- run t
+        threadDelay 50000
+        tlsClose t
         pure ()
       case r of
         Left (e :: SomeException) -> hPrint stderr e
         Right _ -> pure ()
-      close conn
   where
     openListener addr = do
       s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
@@ -280,20 +389,21 @@ serveTlsConcurrent jobs params port = withSocketsDo $ do
   addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) Nothing (Just (show port))
   case addrs of
     [] -> error ("serveTlsConcurrent: cannot resolve port " ++ show port)
-    (addr : _) -> bracket (openListener addr) close $ \lsock -> forever $ do
+    _ -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
       (conn, _) <- accept lsock
       waitQSem sem
       _ <- forkIO $ do
-        r <- try $ do
-          ctx <- contextNew (socketBackend conn) params
+        r <- try $ bracket (mkTlsBackend conn) backendClose $ \b -> do
+          ctx <- contextNew b params
           handshake ctx
           t <- tlsTransport ctx
           _ <- run t
+          threadDelay 50000
+          tlsClose t
           pure ()
         case r of
           Left (e :: SomeException) -> hPrint stderr e
           Right _ -> pure ()
-        close conn
         signalQSem sem
       pure ()
   where

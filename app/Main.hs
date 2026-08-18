@@ -20,7 +20,11 @@ import System.Environment (getArgs)
 import System.Exit (ExitCode (..), die, exitSuccess, exitWith)
 import System.FilePath (takeFileName)
 import System.IO (hPutStrLn, stderr)
+#ifdef mingw32_HOST_OS
+import System.Environment (lookupEnv)
+#else
 import System.Posix.Unistd (getSystemID, nodeName)
+#endif
 
 main :: IO ()
 main = do
@@ -49,7 +53,11 @@ serveOne portStr cert key ca mReg jobs = do
     Nothing -> pure ()
     Just regUrl -> do
       fp <- certFingerprintSHA256 cert
+#ifdef mingw32_HOST_OS
+      host <- maybe "unknown" id <$> lookupEnv "COMPUTERNAME"
+#else
       host <- nodeName <$> getSystemID
+#endif
       let reg = RegistryUrl regUrl
           sid = T.pack ("modelmirrors-" ++ host ++ "-" ++ portStr)
       ok <- registerService reg (ServiceInfo sid host port fp)

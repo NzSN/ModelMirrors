@@ -1,5 +1,7 @@
 dist-newstyle/*
 **/_apalache-out/*
+*.hi
+*.o
 /.agent-shell/
 TAGS
 tags
