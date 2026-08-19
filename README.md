@@ -270,7 +270,7 @@ ModelMirrors --server 8999 --tls \
 
 Clients must present a certificate signed by the same CA; TLS 1.3 is the
 only accepted protocol version. Certificates are short-lived — re-run
-`gen-certs.sh` to renew before expiry. See `docs/server-mode-mtls-design.md`.
+`gen-certs.sh` to renew before expiry. See `docs/server-mode-design.md#2-secure-transport-mtls`.
 
 ### Service discovery (registry)
 
@@ -289,7 +289,7 @@ and should verify the fingerprint with
 `Protocol.Transport.Tls.connectTlsPinned`. The registry only provides
 location — authentication always happens in the mTLS handshake, so a
 compromised registry cannot impersonate a server. See
-`docs/server-mode-registry-design.md`.
+`docs/server-mode-design.md#3-discovery-service-registry`.
 
 ## Remote validation
 
