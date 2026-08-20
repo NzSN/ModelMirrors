@@ -4,8 +4,9 @@ import Apalache.Command (generateTraceFiles)
 import Apalache.Types (ApalacheConfig (..), TraceGenerationConfig (..))
 import Control.Concurrent (forkIO, killThread, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryPutMVar, tryReadMVar)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, displayException, try)
 import Data.ByteString.Char8 qualified as B8
+import Data.List (isInfixOf)
 import Data.Text qualified as T
 import Network.Socket
   ( AddrInfo (..)
@@ -34,12 +35,15 @@ import Protocol.Transport.Tls
   , peerCertFingerprintSHA256
   , serveTls
   , serveTlsConcurrent
+  , serveTlsConcurrentOn
   )
+import Network.TLS (ServerParams)
 import RegistrySpec (withStubHttp)
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
+import System.FilePath (takeDirectory)
 import System.Process (callProcess)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 spec :: TestTree
 spec = testGroup "TlsTransportSpec"
@@ -50,6 +54,9 @@ spec = testGroup "TlsTransportSpec"
   , testFullSessionOverTls
   , testDiscoverThenPinnedConnect
   , testConcurrentSessions
+  , testBindLoopback
+  , testMkServerParamsRejectsMissingSan
+  , testMkServerParamsRejectsWrongCa
   ]
 
 data Certs = Certs
@@ -61,6 +68,8 @@ data Certs = Certs
   , rogueCaCrt :: FilePath
   , rogueCrt :: FilePath
   , rogueKey :: FilePath
+  , rogueServerCrt :: FilePath
+  , rogueServerKey :: FilePath
   }
 
 freePort :: IO PortNumber
@@ -92,6 +101,7 @@ genCerts = do
     , "-out", f "rogue-ca.crt", "-days", "1", "-nodes", "-subj", "/CN=Rogue CA" ]
   writeFile (f "server.ext") "subjectAltName=IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n"
   writeFile (f "client.ext") "basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=clientAuth\n"
+  writeFile (f "rogue-server.ext") "subjectAltName=IP:127.0.0.1\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n"
   let issue name ca ext cn = do
         callProcess "openssl"
           [ "req", "-newkey", "rsa:2048", "-keyout", f (name ++ ".key")
@@ -104,6 +114,7 @@ genCerts = do
   issue "server" "ca" "server.ext" "127.0.0.1"
   issue "client" "ca" "client.ext" "test-client"
   issue "rogue" "rogue-ca" "client.ext" "rogue-client"
+  issue "rogue-server" "rogue-ca" "rogue-server.ext" "127.0.0.1"
   pure Certs
     { caCrt = f "ca.crt"
     , serverCrt = f "server.crt"
@@ -113,6 +124,8 @@ genCerts = do
     , rogueCaCrt = f "rogue-ca.crt"
     , rogueCrt = f "rogue.crt"
     , rogueKey = f "rogue.key"
+    , rogueServerCrt = f "rogue-server.crt"
+    , rogueServerKey = f "rogue-server.key"
     }
 
 withServer :: Certs -> (PortNumber -> IO a) -> IO a
@@ -276,3 +289,59 @@ testConcurrentSessions = testCase "dispatcher runs two overlapping sessions" $ d
     (Right (), Right ()) -> pure ()
     (Left e, _) -> assertFailure ("session 1 failed: " ++ e)
     (_, Left e) -> assertFailure ("session 2 failed: " ++ e)
+
+-- | The @--bind@-aware serving functions bind the requested host: a server
+-- started with @serveTlsConcurrentOn 2 "127.0.0.1"@ is reachable on loopback
+-- (whereas @serveTlsConcurrent@ would bind the wildcard). We assert a loopback
+-- client can complete a TLS handshake against it.
+testBindLoopback :: TestTree
+testBindLoopback = testCase "serveTlsOn/ConcurrentOn binds the requested loopback address" $ do
+  certs <- genCerts
+  port <- freePort
+  params <- mkServerParams (serverCrt certs) (serverKey certs) (caCrt certs)
+  tid <- forkIO (serveTlsConcurrentOn 2 "127.0.0.1" params port)
+  threadDelay 200000
+  clientParams <- mkClientParams "127.0.0.1" (clientCrt certs) (clientKey certs) (caCrt certs)
+  t <- connectTls clientParams "127.0.0.1" port
+  send t (B8.pack "garbage")
+  reply <- recvMsg t :: IO (Either String MirrorMessage)
+  killThread tid
+  case reply of
+    Right (ProtocolError _) -> pure ()
+    other -> assertFailure ("expected protocol_error from loopback-bound server, got " ++ show other)
+
+-- | Startup validation (P4): a server cert with no Subject Alternative Name
+-- must be rejected by 'mkServerParams' before binding.
+testMkServerParamsRejectsMissingSan :: TestTree
+testMkServerParamsRejectsMissingSan = testCase "mkServerParams rejects a cert with no SAN" $ do
+  certs <- genCerts
+  -- Reuse the test CA (its key sits next to caCrt) to sign a SAN-less cert.
+  let dir = takeDirectory (caCrt certs)
+  -- Issue a server-style cert signed by the existing test CA but with an ext
+  -- file that omits subjectAltName.
+  writeFile (dir ++ "/nosan.ext") "basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n"
+  callProcess "openssl"
+    [ "req", "-newkey", "rsa:2048", "-keyout", dir ++ "/nosan.key"
+    , "-out", dir ++ "/nosan.csr", "-nodes", "-subj", "/CN=nosan" ]
+  callProcess "openssl"
+    [ "x509", "-req", "-in", dir ++ "/nosan.csr", "-CA", caCrt certs
+    , "-CAkey", dir ++ "/ca.key", "-CAcreateserial", "-out", dir ++ "/nosan.crt"
+    , "-days", "1", "-extfile", dir ++ "/nosan.ext" ]
+  callProcess "chmod" ["600", dir ++ "/nosan.key"]
+  r <- try (mkServerParams (dir ++ "/nosan.crt") (dir ++ "/nosan.key") (caCrt certs)) :: IO (Either SomeException ServerParams)
+  case r of
+    Left _ -> pure ()
+    Right _ -> assertFailure "mkServerParams accepted a server cert with no SAN"
+
+-- | Startup validation (P4): a server cert signed by a different CA must be
+-- rejected by 'mkServerParams' (it does not validate against the CA file).
+testMkServerParamsRejectsWrongCa :: TestTree
+testMkServerParamsRejectsWrongCa = testCase "mkServerParams rejects a cert signed by a different CA" $ do
+  certs <- genCerts
+  -- rogue-server.crt has a valid server SAN, so a rejection can only come
+  -- from the CA-chain check: it is signed by rogueCaCrt, not caCrt.
+  r <- try (mkServerParams (rogueServerCrt certs) (rogueServerKey certs) (caCrt certs)) :: IO (Either SomeException ServerParams)
+  case r of
+    Left e -> assertBool ("rejected for the wrong reason: " ++ displayException e)
+      ("does not validate against the CA file" `isInfixOf` displayException e)
+    Right _ -> assertFailure "mkServerParams accepted a cert signed by a different CA"

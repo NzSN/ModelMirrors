@@ -141,9 +141,9 @@ three mirror roles and one client role:
 | Command | Role | Description |
 |---|---|---|
 | `ModelMirrors` | stdio mirror | Speaks one protocol session on stdin/stdout, newline-delimited JSON, then exits. For embedding the mirror in a client process. |
-| `ModelMirrors --serve <port>` | TCP daemon | Accepts TCP connections and speaks one session per connection (sequential accept loop). Client drops are logged and survived. |
-| `ModelMirrors --server <port> --tls --cert C --key K --ca CA [--registry URL] [--jobs N]` | mTLS daemon | TLS 1.3 with mutual authentication (client certs required). `--jobs N` (default 4) enables a bounded concurrent dispatcher with per-session apalache isolation; `--registry URL` registers with a Consul registry and keeps a 10s TTL heartbeat. See "Secure server mode". |
-| `ModelMirrors validate --host H --port P --spec S.tla [--dep D.tla]... [--bound N] [--inv I] [--init P] [--next P] [--cinit C] [--tls --cert C --key K --ca CA] [--pin SHA256]` | validate client | Sends a spec (plus deps, inline) to a remote mirror for typecheck + bounded model check, prints the verdict, exits 0 (`VALID`) / 1 (`INVALID`) / 2 (infrastructure error). See "Remote validation". |
+| `ModelMirrors --serve <port> [--bind <addr>]` | TCP daemon | Accepts TCP connections and speaks one session per connection (sequential accept loop). Client drops are logged and survived. `--bind <addr>` restricts the listener to one address (e.g. `127.0.0.1`). |
+| `ModelMirrors --server <port> --tls --cert C --key K --ca CA [--registry URL] [--jobs N] [--bind <addr>]` | mTLS daemon | TLS 1.3 with mutual authentication (client certs required). `--jobs N` (default 4) enables a bounded concurrent dispatcher with per-session apalache isolation; `--registry URL` (or `MODELMIRRORS_REGISTRY`) registers with a Consul registry and keeps a 10s TTL heartbeat; `--bind <addr>` restricts the listener. See "Secure server mode". |
+| `ModelMirrors validate --host H --port P [--registry URL] --spec S.tla [--dep D.tla]... [--bound N] [--inv I] [--init P] [--next P] [--cinit C] [--tls --cert C --key K --ca CA] [--pin SHA256]` | validate client | Sends a spec (plus deps, inline) to a remote mirror for typecheck + bounded model check, prints the verdict, exits 0 (`VALID`) / 1 (`INVALID`) / 2 (infrastructure error). With `--registry URL` it discovers a mirror via Consul and uses `--tls` mTLS (mutually exclusive with `--host`/`--port`). See "Remote validation". |
 
 ```sh
 cabal run ModelMirrors                 # stdio mirror (one session)
@@ -247,8 +247,8 @@ order matters: **`sources[0]` is the root module**, the rest are dependencies.
 | Mode | How | Notes |
 |---|---|---|
 | stdio | run with no args | One session, then exit |
-| TCP | `--serve <port>` | Daemon: one session per connection, sequential accept loop; a dropped client is logged to stderr and the loop continues. Plain TCP, no TLS |
-| mTLS server | `--server <port> --tls --cert <crt> --key <key> --ca <ca> [--registry <url>] [--jobs <n>]` | TLS 1.3 with mutual authentication: the server requires a client certificate signed by the given CA. Runs a bounded dispatcher with `n` concurrent sessions (default 4; `--jobs 1` falls back to sequential). Optional service registration (see below) |
+| TCP | `--serve <port> [--bind <addr>]` | Daemon: one session per connection, sequential accept loop; a dropped client is logged to stderr and the loop continues. Plain TCP, no TLS. `--bind <addr>` restricts the listener |
+| mTLS server | `--server <port> --tls --cert <crt> --key <key> --ca <ca> [--registry <url>] [--jobs <n>] [--bind <addr>]` | TLS 1.3 with mutual authentication: the server requires a client certificate signed by the given CA. Runs a bounded dispatcher with `n` concurrent sessions (default 4; `--jobs 1` falls back to sequential). `--registry <url>` (or `MODELMIRRORS_REGISTRY`) enables service registration; `--bind <addr>` restricts the listener. See "Secure server mode" |
 
 Concurrent sessions are isolated: each gets its own apalache `--run-dir`
 and its own explorer server on an ephemeral port.
@@ -261,11 +261,23 @@ Generate a private CA plus server/client credentials:
 scripts/gen-certs.sh certs 127.0.0.1 30
 ```
 
-Start the server (the key file must be mode `0600`; the server refuses to start otherwise):
+Start the server (the key file must be mode `0600`; the server refuses to
+start otherwise, and it also refuses to start if the certificate chain does
+not validate against the CA file or the leaf certificate has no Subject
+Alternative Name):
 
 ```sh
 ModelMirrors --server 8999 --tls \
     --cert certs/server.crt --key certs/server.key --ca certs/ca.crt
+```
+
+To restrict which interface the listener binds (e.g. loopback only), pass
+`--bind <addr>`:
+
+```sh
+ModelMirrors --server 8999 --tls \
+    --cert certs/server.crt --key certs/server.key --ca certs/ca.crt \
+    --bind 127.0.0.1
 ```
 
 Clients must present a certificate signed by the same CA; TLS 1.3 is the
@@ -274,9 +286,14 @@ only accepted protocol version. Certificates are short-lived — re-run
 
 ### Service discovery (registry)
 
-With `--registry <url>` the server registers itself in a Consul-compatible
+With `--registry <url>` (or the `MODELMIRRORS_REGISTRY` environment variable
+when the flag is omitted) the server registers itself in a Consul-compatible
 service registry (service name `modelmirrors`) with a 30s TTL check and a
-10s heartbeat, publishing its certificate's SHA-256 fingerprint as metadata:
+10s heartbeat, publishing its certificate's SHA-256 fingerprint as metadata.
+A server that cannot publish its fingerprint (no cert found) fails to start
+rather than registering a pin-less entry. On shutdown the server
+deregisters best-effort (SIGINT/SIGTERM and normal exits on POSIX; normal
+exits only on Windows):
 
 ```sh
 ModelMirrors --server 8999 --tls \
@@ -285,8 +302,9 @@ ModelMirrors --server 8999 --tls \
 ```
 
 Clients discover healthy servers via `Protocol.Registry.discoverServices`
-and should verify the fingerprint with
-`Protocol.Transport.Tls.connectTlsPinned`. The registry only provides
+and verify the fingerprint with `Protocol.Transport.Tls.connectTlsPinned`.
+The `validate` client can discover mirrors directly with
+`--registry <url>` (see "Remote validation"). The registry only provides
 location — authentication always happens in the mTLS handshake, so a
 compromised registry cannot impersonate a server. See
 `docs/server-mode-design.md#3-discovery-service-registry`.
@@ -299,14 +317,14 @@ them **inline** to a remote mirror, prints the verdict, and exits with a code
 CI can branch on. The server never sees the client's filesystem.
 
 ```sh
-ModelMirrors validate --host H --port P --spec Spec.tla [--dep D.tla]... [--bound N] [--inv I] [--init P] [--next P] [--cinit C] [--tls --cert C --key K --ca CA] [--pin SHA256]
+ModelMirrors validate --host H --port P [--registry URL] --spec Spec.tla [--dep D.tla]... [--bound N] [--inv I] [--init P] [--next P] [--cinit C] [--tls --cert C --key K --ca CA] [--pin SHA256]
 ```
 
 | Exit | Meaning | Output |
 |---|---|---|
 | 0 | spec valid | `VALID` on stdout |
 | 1 | spec invalid | `INVALID` + apalache output on stdout |
-| 2 | infrastructure error (transport / `register_error` / `protocol_error`) | error text on stderr |
+| 2 | infrastructure error (transport / discovery / `register_error` / `protocol_error`) | error text on stderr |
 
 The spec travels inline (`ApalacheSpec` sources), so the mirror materializes it
 to a temp dir and needs no access to the client's filesystem. `--bound` (default
@@ -316,6 +334,14 @@ typecheck + deadlock-freedom only). For `--tls`, generate credentials with
 the server certificate fingerprint (`--pin` requires `--tls`). The mirror caps
 the accepted bound at `maxValidateBound` (100); an out-of-range bound gets
 `register_error` (exit 2).
+
+**Service discovery:** instead of a direct `--host`/`--port`, pass
+`--registry <url>` to discover mirrors from a Consul registry. Discovery mode
+is mTLS-only: it requires `--tls --cert --key --ca`, and is mutually exclusive
+with `--host`/`--port`. Candidates are tried in order with per-candidate
+failures logged; the registry-advertised certificate fingerprint is pinned
+unless an explicit `--pin` overrides it. If no candidate can be reached (or the
+registry returns none), the client exits 2.
 
 ## Process model
 

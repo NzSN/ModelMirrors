@@ -4,6 +4,7 @@ module Protocol.Transport.Tcp
   , connectTcp
   , tcpClose
   , serveTcp
+  , serveTcpOn
   , serveTcpConcurrent
   , pickListenerAddr
   ) where
@@ -88,27 +89,34 @@ instance Transport TcpTransport where
 -- | Listen on the given port and serve one protocol session per connection,
 -- sequentially. A client that drops mid-session logs to stderr and the
 -- accept loop continues; the loop only exits via process signals or a
--- listener failure.
+-- listener failure. Binds the all-interfaces wildcard address.
 serveTcp :: PortNumber -> IO ()
-serveTcp port = withSocketsDo $ do
-  addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) Nothing (Just (show port))
-  case addrs of
-    [] -> error ("serveTcp: cannot resolve port " ++ show port)
-    _  -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
-      (conn, _) <- accept lsock
-      t <- tcpTransport conn
-      r <- try (run t)
-      case r of
-        Left (e :: SomeException) -> hPrint stderr e
-        Right _ -> pure ()
-      close conn
-  where
-    openListener addr = do
-      s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-      setSocketOption s ReuseAddr 1
-      bind s (addrAddress addr)
-      listen s 5
-      pure s
+serveTcp = serveTcpOn ""
+
+-- | Like 'serveTcp', but binds only the given host address (e.g.
+-- @127.0.0.1@) instead of the wildcard.
+serveTcpOn :: HostName -> PortNumber -> IO ()
+serveTcpOn host0 port = do
+  let mhost = if null host0 then Nothing else Just host0
+  withSocketsDo $ do
+    addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) mhost (Just (show port))
+    case addrs of
+      [] -> error ("serveTcp: cannot resolve port " ++ show port)
+      _  -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
+        (conn, _) <- accept lsock
+        t <- tcpTransport conn
+        r <- try (run t)
+        case r of
+          Left (e :: SomeException) -> hPrint stderr e
+          Right _ -> pure ()
+        close conn
+    where
+      openListener addr = do
+        s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+        setSocketOption s ReuseAddr 1
+        bind s (addrAddress addr)
+        listen s 5
+        pure s
 
 -- | Like 'serveTcp', but dispatches each accepted connection to a worker
 -- thread, bounded to at most @jobs@ concurrent sessions (excess

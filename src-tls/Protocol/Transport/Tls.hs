@@ -6,6 +6,8 @@ module Protocol.Transport.Tls
   , mkClientParams
   , serveTls
   , serveTlsConcurrent
+  , serveTlsOn
+  , serveTlsConcurrentOn
   , connectTls
   , connectTlsPinned
   , certFingerprintSHA256
@@ -14,7 +16,7 @@ module Protocol.Transport.Tls
 
 import Control.Concurrent (forkIO, newQSem, signalQSem, threadDelay, waitQSem)
 import Control.Exception (SomeException, bracket, bracketOnError, catch, try)
-import Control.Monad (forever, when)
+import Control.Monad (forever, unless, when)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
 #ifndef mingw32_HOST_OS
@@ -75,9 +77,23 @@ import Network.TLS
   , sendData
   , validateClientCertificate
   )
-import Data.X509 (SignedCertificate, certValidity, encodeSignedObject, getCertificate)
-import Data.X509.CertificateStore (readCertificateStore)
+import Data.X509
+  ( Certificate
+  , SignedCertificate
+  , certExtensions
+  , certIssuerDN
+  , certPubKey
+  , certSubjectDN
+  , certValidity
+  , AltName (..)
+  , ExtSubjectAltName (..)
+  , encodeSignedObject
+  , extensionGet
+  , getCertificate
+  )
+import Data.X509.CertificateStore (CertificateStore, listCertificates, readCertificateStore)
 import Data.X509.File (readSignedObject)
+import Data.X509.Validation (SignatureVerification (..), verifySignedSignature)
 import Crypto.Hash (SHA256 (..), hashWith)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -138,6 +154,7 @@ mkServerParams certFile keyFile caFile = do
   cred <- either (ioError . userError . ("mkServerParams: cannot load credentials: " ++)) pure credResult
   mStore <- readCertificateStore caFile
   caStore <- maybe (ioError (userError ("mkServerParams: no certificates in CA file " ++ caFile))) pure mStore
+  validateServerCertChain caStore certFile
   pure defaultParamsServer
     { serverWantClientCert = True
     , serverShared = (serverShared defaultParamsServer)
@@ -154,6 +171,60 @@ mkServerParams certFile keyFile caFile = do
         , onUnverifiedClientCert = pure False
         }
     }
+
+-- | Validate the server certificate chain against a CA store before any
+-- listener is bound: the leaf must carry a non-empty Subject Alternative Name
+-- (DNS or IP), and the whole chain must cryptographically verify against (and
+-- conclude at) a certificate trusted by the CA store. This is a structural,
+-- hostname-independent check (the server may bind a wildcard/unspecified
+-- address and does not know its advertised hostname at startup).
+--
+-- If the validation API proves awkward for a particular deployment, this is
+-- the single place to relax; do not silently drop the SAN requirement.
+validateServerCertChain :: CertificateStore -> FilePath -> IO ()
+validateServerCertChain caStore certFile = do
+  certs <- readSignedObject certFile :: IO [SignedCertificate]
+  case certs of
+    [] -> ioError (userError ("mkServerParams: server certificate file " ++ certFile ++ " contains no certificates"))
+    (leaf : _) -> do
+      let leafCert = getCertificate leaf
+      case sanEntries leafCert of
+        [] -> ioError (userError ("mkServerParams: server certificate " ++ certFile ++ " has no Subject Alternative Name (DNS or IP)"))
+        _ -> pure ()
+      unless (chainValidates caStore certs)
+        (ioError (userError ("mkServerParams: server certificate chain in " ++ certFile ++ " does not validate against the CA file")))
+
+-- | List the leaf's Subject Alternative Name entries (DNS or IP, or others).
+sanEntries :: Certificate -> [AltName]
+sanEntries cert = case (extensionGet (certExtensions cert) :: Maybe ExtSubjectAltName) of
+  Just (ExtSubjectAltName alts) -> alts
+  Nothing -> []
+
+-- | Verify that every certificate in @chain@ (leaf first) is signed by a
+-- certificate that is either elsewhere in the chain or trusted by @caStore@.
+-- @verifySignedSignature child signerPubKey@ checks the child's signature with
+-- the signer's public key. A leaf-only server chain (the common case, where the
+-- CA is kept out of the served file) is verified when its signer is found in
+-- @caStore@.
+chainValidates :: CertificateStore -> [SignedCertificate] -> Bool
+chainValidates caStore chain =
+  not (null chain) && all ok (zip chain [0 :: Int ..])
+  where
+    trusted = listCertificates caStore
+    nTrusted = length trusted
+    allCerts = trusted ++ chain
+    ok (child, i) =
+      let childCert = getCertificate child
+          selfIdx = nTrusted + i
+          candidates = [ sc
+                       | (j, sc) <- zip [0 ..] allCerts
+                       , j /= selfIdx
+                       , certSubjectDN (getCertificate sc) == certIssuerDN childCert
+                       ]
+      in case candidates of
+           (signer : _) -> verifySignedSignature child (certPubKey (getCertificate signer)) == SignaturePass
+           [] -> False
+
 
 -- | Build TLS 1.3-only client parameters for mutual authentication.
 -- The client certificate and key are required (the server requests a
@@ -352,10 +423,19 @@ tlsBackend writeSock h = Backend
 -- mutually-authenticated TLS 1.3 session before entering the protocol
 -- loop. Handshake failures and client drops are logged to stderr and
 -- survived; the loop only exits via process signals or a listener
--- failure.
+-- failure. Binds the all-interfaces wildcard address ('AI_PASSIVE' with
+-- no host).
 serveTls :: ServerParams -> PortNumber -> IO ()
-serveTls params port = withSocketsDo $ do
-  addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) Nothing (Just (show port))
+serveTls = serveTlsWith Nothing
+
+-- | Like 'serveTls', but binds only the given host address (e.g.
+-- @127.0.0.1@). Kept for callers that need to restrict the listener.
+serveTlsOn :: HostName -> ServerParams -> PortNumber -> IO ()
+serveTlsOn host = serveTlsWith (Just host)
+
+serveTlsWith :: Maybe HostName -> ServerParams -> PortNumber -> IO ()
+serveTlsWith mhost params port = withSocketsDo $ do
+  addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) mhost (Just (show port))
   case addrs of
     [] -> error ("serveTls: cannot resolve port " ++ show port)
     _ -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
@@ -382,34 +462,42 @@ serveTls params port = withSocketsDo $ do
 -- | Like 'serveTls', but dispatches each accepted connection to a worker
 -- thread (bounded to @jobs@ concurrent sessions). The TLS handshake
 -- happens in the worker, so a slow or stalled handshake never blocks the
--- accept loop. Worker failures are logged to stderr and survived.
+-- accept loop. Worker failures are logged to stderr and survived. Binds
+-- the all-interfaces wildcard address.
 serveTlsConcurrent :: Int -> ServerParams -> PortNumber -> IO ()
-serveTlsConcurrent jobs params port = withSocketsDo $ do
-  sem <- newQSem jobs
-  addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) Nothing (Just (show port))
-  case addrs of
-    [] -> error ("serveTlsConcurrent: cannot resolve port " ++ show port)
-    _ -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
-      (conn, _) <- accept lsock
-      waitQSem sem
-      _ <- forkIO $ do
-        r <- try $ bracket (mkTlsBackend conn) backendClose $ \b -> do
-          ctx <- contextNew b params
-          handshake ctx
-          t <- tlsTransport ctx
-          _ <- run t
-          threadDelay 50000
-          tlsClose t
-          pure ()
-        case r of
-          Left (e :: SomeException) -> hPrint stderr e
-          Right _ -> pure ()
-        signalQSem sem
-      pure ()
-  where
-    openListener addr = do
-      s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-      setSocketOption s ReuseAddr 1
-      bind s (addrAddress addr)
-      listen s 5
-      pure s
+serveTlsConcurrent jobs = serveTlsConcurrentOn jobs ""
+
+-- | Like 'serveTlsConcurrent', but binds only the given host address
+-- (e.g. @127.0.0.1@).
+serveTlsConcurrentOn :: Int -> HostName -> ServerParams -> PortNumber -> IO ()
+serveTlsConcurrentOn jobs host0 params port = do
+  let mhost = if null host0 then Nothing else Just host0
+  withSocketsDo $ do
+    sem <- newQSem jobs
+    addrs <- getAddrInfo (Just defaultHints { addrFlags = [AI_PASSIVE] }) mhost (Just (show port))
+    case addrs of
+      [] -> error ("serveTlsConcurrent: cannot resolve port " ++ show port)
+      _ -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
+        (conn, _) <- accept lsock
+        waitQSem sem
+        _ <- forkIO $ do
+          r <- try $ bracket (mkTlsBackend conn) backendClose $ \b -> do
+            ctx <- contextNew b params
+            handshake ctx
+            t <- tlsTransport ctx
+            _ <- run t
+            threadDelay 50000
+            tlsClose t
+            pure ()
+          case r of
+            Left (e :: SomeException) -> hPrint stderr e
+            Right _ -> pure ()
+          signalQSem sem
+        pure ()
+    where
+      openListener addr = do
+        s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+        setSocketOption s ReuseAddr 1
+        bind s (addrAddress addr)
+        listen s 5
+        pure s

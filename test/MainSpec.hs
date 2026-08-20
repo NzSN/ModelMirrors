@@ -23,7 +23,9 @@ import Network.Socket
   , listen
   , socket
   )
+import Protocol.Discover (DiscoveredPeer (..), candidateFingerprint, tryCandidates)
 import Protocol.Mirror (MirrorStep, mirrorStepActionName, run)
+import Protocol.ServerOpts (ServerOpts (..), parseServeCli, parseServerOpts)
 import Protocol.Transport.Tcp (serveTcpConcurrent, tcpTransport)
 import Protocol.Transport.Tls (mkServerParams, serveTlsConcurrent)
 import Protocol.ValidateOpts (ValidateOpts (..), parseValidateOpts)
@@ -57,6 +59,9 @@ spec = testGroup "MainSpec"
   , testValidateCliProc2ProcTcpDeps
   , testValidateCliProc2ProcTls
   , testValidateCliProc2ProcTcpOverCap
+  , testServerOpts
+  , testValidateRegistryOpts
+  , testDiscoverLogic
   ]
 
 findMirrorBinary :: IO FilePath
@@ -543,3 +548,95 @@ testValidateCliProc2ProcTcpOverCap =
           zeroExit @?= ExitFailure 2
           assertBool "reports zero bound range error"
             ("allowed range" `isInfixOf` zeroErr)
+
+
+--------------------------------------------------------------------------------
+-- Server-option parser (P1 / P2)
+--------------------------------------------------------------------------------
+
+testServerOpts :: TestTree
+testServerOpts = testGroup "parseServerOpts"
+  [ testCase "parses minimal server args with defaults" $ do
+      case parseServerOpts ["8080", "--tls", "--cert", "c", "--key", "k", "--ca", "ca"] of
+        Left e -> assertFailure e
+        Right o -> do
+          (soPort o, soCert o, soKey o, soCa o) @?= (8080, "c", "k", "ca")
+          soJobs o @?= 4
+          soRegistry o @?= Nothing
+          soBind o @?= Nothing
+  , testCase "parses --bind/--registry/--jobs in any order" $ do
+      case parseServerOpts
+             [ "--tls", "9000", "--cert", "c", "--key", "k", "--ca", "ca"
+             , "--bind", "127.0.0.1", "--registry", "http://r", "--jobs", "2" ] of
+        Left e -> assertFailure e
+        Right o -> do
+          (soPort o, soBind o, soRegistry o, soJobs o) @?= (9000, Just "127.0.0.1", Just "http://r", 2)
+  , testCase "rejects unknown option" $
+      assertBool "unknown option" (isLeft (parseServerOpts ["8080", "--tls", "--cert", "c", "--key", "k", "--ca", "ca", "--bogus"]))
+  , testCase "rejects duplicate --cert" $
+      assertBool "duplicate cert" (isLeft (parseServerOpts ["8080", "--tls", "--cert", "c", "--cert", "c2", "--key", "k", "--ca", "ca"]))
+  , testCase "rejects missing --tls" $
+      assertBool "missing tls" (isLeft (parseServerOpts ["8080", "--cert", "c", "--key", "k", "--ca", "ca"]))
+  , testCase "rejects missing port" $
+      assertBool "missing port" (isLeft (parseServerOpts ["--tls", "--cert", "c", "--key", "k", "--ca", "ca"]))
+  , testCase "rejects non-numeric port and jobs with clear messages" $ do
+      assertBool "bad port" (isLeft (parseServerOpts ["abc", "--tls", "--cert", "c", "--key", "k", "--ca", "ca"]))
+      assertBool "bad jobs" (isLeft (parseServerOpts ["8080", "--tls", "--cert", "c", "--key", "k", "--ca", "ca", "--jobs", "x"]))
+      case parseServerOpts ["8080", "--tls", "--cert", "c", "--key", "k", "--ca", "ca", "--jobs", "x"] of
+        Left e -> assertBool ("clear jobs error: " ++ e) ("invalid --jobs" `isInfixOf` e)
+        Right _ -> assertFailure "expected --jobs error"
+  , testCase "parseServeCli accepts port and --bind" $ do
+      parseServeCli ["1234"] @?= Right (1234, Nothing)
+      parseServeCli ["1234", "--bind", "127.0.0.1"] @?= Right (1234, Just "127.0.0.1")
+      assertBool "bad serve" (isLeft (parseServeCli ["abc"]))
+  ]
+
+--------------------------------------------------------------------------------
+-- Registry-based validate-option parser (P3)
+--------------------------------------------------------------------------------
+
+testValidateRegistryOpts :: TestTree
+testValidateRegistryOpts = testGroup "parseValidateOpts --registry"
+  [ testCase "registry mode: host/port optional, tls+creds required" $ do
+      case parseValidateOpts ["--spec", "s.tla", "--registry", "http://r", "--tls", "--cert", "c", "--key", "k", "--ca", "ca"] of
+        Right o -> do
+          voRegistry o @?= Just "http://r"
+          voTls o @?= True
+        Left e -> assertFailure e
+  , testCase "registry mode rejects --host combination" $
+      assertBool "host not allowed" (isLeft (parseValidateOpts ["--spec", "s", "--registry", "http://r", "--host", "h", "--port", "1", "--tls", "--cert", "c", "--key", "k", "--ca", "ca"]))
+  , testCase "registry mode rejects an explicit empty --host" $
+      assertBool "empty host not allowed" (isLeft (parseValidateOpts ["--spec", "s", "--registry", "http://r", "--host", "", "--tls", "--cert", "c", "--key", "k", "--ca", "ca"]))
+  , testCase "registry mode rejects an explicit --port 0" $
+      assertBool "port 0 not allowed" (isLeft (parseValidateOpts ["--spec", "s", "--registry", "http://r", "--port", "0", "--tls", "--cert", "c", "--key", "k", "--ca", "ca"]))
+  , testCase "registry mode requires --tls" $
+      assertBool "needs tls" (isLeft (parseValidateOpts ["--spec", "s", "--registry", "http://r"]))
+  , testCase "registry mode requires creds" $
+      assertBool "needs creds" (isLeft (parseValidateOpts ["--spec", "s", "--registry", "http://r", "--tls"]))
+  ]
+
+--------------------------------------------------------------------------------
+-- Protocol.Discover candidate logic (P3)
+--------------------------------------------------------------------------------
+
+testDiscoverLogic :: TestTree
+testDiscoverLogic = testGroup "Protocol.Discover"
+  [ testCase "candidateFingerprint: explicit pin wins, else registry metadata" $ do
+      let peer = DiscoveredPeer "host" 1234 (Just (T.pack "regfp"))
+      candidateFingerprint Nothing peer @?= Just (T.pack "regfp")
+      candidateFingerprint (Just (T.pack "mypin")) peer @?= Just (T.pack "mypin")
+  , testCase "tryCandidates: first success wins (first candidate fails)" $ do
+      res <- tryCandidates [1 :: Int, 2, 3] $ \n -> pure $
+        if n == 1 then Left "first failed" else Right (n * 10)
+      res @?= Right 20
+  , testCase "tryCandidates: returns concatenated errors when all fail" $ do
+      res <- tryCandidates [1 :: Int, 2] $ \_ -> pure (Left "boom")
+      case res of
+        Left e -> assertBool ("includes both: " ++ e) (("boom; boom") `isInfixOf` e)
+        Right _ -> assertFailure "expected all-fail"
+  , testCase "tryCandidates: empty list reports no candidates" $ do
+      res <- tryCandidates ([] :: [Int]) $ \_ -> pure (Left "unused")
+      case res of
+        Left e -> assertBool ("no candidates: " ++ e) ("no candidates" `isInfixOf` e)
+        Right _ -> assertFailure "expected failure on empty"
+  ]

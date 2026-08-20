@@ -111,13 +111,15 @@ No auth messages are added to `Protocol.Core` — the `AuthHello`/`AuthReply`/`A
 
 | Module | Change |
 |--------|--------|
-| `app/Main.hs` | `--server --tls` flag handling, startup validation, refuse startup on invalid config |
-| `Protocol.Transport.Tls` (new) | `serveTls`: wraps each accepted socket in a TLS server context (`tls` package); exposes a `TlsTransport` implementing the existing two-method `Transport` class over the TLS channel |
-| `Protocol.Transport.Tcp` | Extract shared accept-loop structure reused by `serveTls`; `serveTcp` unchanged |
-| `Protocol.Client` | Client entry points accept TLS parameters (CA, client cert/key); registry discovery verifies the cert fingerprint when present |
-| `Protocol.Mirror`, `Protocol.Core`, `Protocol.Format.Json` | **Unchanged** |
+| `app/Main.hs` | `--serve`/`--server` parsing via `Protocol.ServerOpts`; `--server --tls` startup validation; registry registration, heartbeat, and best-effort shutdown deregistration; `validate --registry` discovery mode |
+| `Protocol.Transport.Tls` (new) | `serveTls`/`serveTlsOn`/`serveTlsConcurrentOn`: wraps each accepted socket in a TLS server context (`tls` package); exposes a `TlsTransport` implementing the existing two-method `Transport` class over the TLS channel |
+| `Protocol.Transport.Tcp` | `serveTcpOn`: host-aware bind in addition to `serveTcp`; both share the existing listener-address selection |
+| `Protocol.ServerOpts` (new) | Pure, order-independent parser for `--serve` and `--server` (port, TLS files, registry, jobs, bind) |
+| `Protocol.Discover` (new) | Transport-agnostic candidate iteration (`tryCandidates`) and fingerprint selection (`candidateFingerprint`) for registry discovery |
+| `Protocol.ValidateOpts` | `--registry` mode for `validate`: mTLS-only discovery, mutually exclusive with `--host`/`--port` |
+| `Protocol.Client`, `Protocol.Mirror`, `Protocol.Core`, `Protocol.Format.Json` | **Unchanged** |
 | `scripts/gen-certs.sh` (new) | CA + server + client cert generation helper |
-| `.cabal` | Add `tls`, `x509`, `x509-store` dependencies |
+| `.cabal` | Add `tls`, `crypton`, `crypton-x509`, `crypton-x509-store`, `crypton-x509-validation` dependencies |
 
 ### Compatibility
 
@@ -177,7 +179,7 @@ On `ModelMirrors --server <port> --tls ... --registry <url>`:
 2. **Heartbeat**: a forked thread sends `PUT /v1/agent/check/pass/service:<id>` every 10 s. If the heartbeat fails repeatedly, the TTL check lapses and the registry marks the service critical — clients stop seeing it. Thread failures are caught and retried, never killing the accept loop (same resilience pattern as `serveTls`).
 3. **Deregister** (best-effort, on shutdown): `PUT /v1/agent/service/deregister/<id>`.
 
-The registry URL comes from `--registry <url>` or `MODELMIRRORS_REGISTRY`; without it, `--server` runs with no registration (direct-connect only), matching today's behavior.
+The registry URL comes from `--registry <url>` or `MODELMIRRORS_REGISTRY`; without it, `--server` runs with no registration (direct-connect only), matching today's behavior. A server whose certificate fingerprint cannot be computed refuses to start rather than publishing a pin-less registry entry.
 
 ### Client side: discovery
 
@@ -192,6 +194,20 @@ Client flow:
 1. `discoverServices` → candidates.
 2. `connectTls` to a candidate (mTLS authenticates the server regardless of registry honesty).
 3. **Fingerprint pinning (defense-in-depth)**: if the entry carries `cert-sha256`, compare it against the peer certificate fingerprint after the handshake; mismatch → close and try the next candidate.
+
+### Validate CLI discovery
+
+The `validate` CLI can use the registry instead of a hardcoded `--host`/`--port`:
+
+```sh
+ModelMirrors validate --registry <url> --spec Spec.tla \
+    --tls --cert C --key K --ca CA [--pin SHA256]
+```
+
+- `--registry` is mutually exclusive with `--host`/`--port` and discovery is mTLS-only: `--tls --cert --key --ca` are required.
+- `discoverServices` returns healthy candidates; `Protocol.Discover.tryCandidates` tries them in order and keeps the first transport that connects.
+- The registry-advertised `cert-sha256` is pinned with `connectTlsPinned`; an explicit `--pin` overrides the registry metadata. Entries without a fingerprint use plain `connectTls`.
+- If the registry returns no candidates, or every candidate fails, the CLI prints the collected diagnostics and exits 2.
 
 ### Security model
 
@@ -252,12 +268,12 @@ Gate: existing `cabal build all` / `cabal test all` still green (no behavior cha
 
 Tasks:
 
-1. `app/Main.hs`: extend the argument case to parse `--server` mode and TLS flags (simple pattern-match parser, consistent with the current style — no optparse-applicative dependency).
+1. `src/Protocol/ServerOpts.hs` + `app/Main.hs`: replace fixed-pattern `--server` matching with a pure, order-independent parser (`parseServerOpts`/`parseServeCli`, consistent with `Protocol.ValidateOpts` — no optparse-applicative dependency).
 2. Startup validation (fail fast, clear errors, before binding):
    - all files readable; key file mode `0600`;
    - certificate chain validates against the CA; SAN non-empty;
    - cert expiry < 7 days → log a warning (per design residual-risk mitigation).
-3. `--bind <addr>`: thread the address through `serveTls` (and optionally `serveTcp`) instead of `AI_PASSIVE`-only.
+3. `--bind <addr>`: add `serveTlsOn`/`serveTlsConcurrentOn` (and `serveTcpOn`) so listeners can bind a specific address instead of `AI_PASSIVE`-only.
 4. Smoke test that the binary rejects bad flag combinations and missing files with exit-code failures.
 
 Gate: manual smoke — generate throwaway certs with openssl, start `--server --tls`, connect with `openssl s_client -connect ... -cert client.crt -key client.key`, observe the mirror waiting for `Register`.
@@ -283,13 +299,14 @@ Per Section 3: Consul HTTP API via the existing `http-client` dependency. The re
 Tasks:
 
 1. New module `src/Protocol/Registry.hs`:
-   - `registerService :: RegistryUrl -> ServiceInfo -> IO ()` (`PUT /v1/agent/service/register` with TTL check)
+   - `registerService :: RegistryUrl -> ServiceInfo -> IO Bool` (`PUT /v1/agent/service/register` with TTL check; returns `False` on failure instead of throwing)
    - `heartbeatLoop :: RegistryUrl -> ServiceId -> IO ()` (forked; `PUT /v1/agent/check/pass/service:<id>` every 10 s, `try`-guarded, never kills the accept loop)
    - `deregisterService :: RegistryUrl -> ServiceId -> IO ()` (best-effort)
    - `discoverServices :: RegistryUrl -> IO [ServiceInfo]` (`GET /v1/health/service/modelmirrors?passing=true`; malformed JSON → `[]`, fail closed)
-2. `app/Main.hs`: `--registry <url>` flag (or `MODELMIRRORS_REGISTRY` env var) on `--server`; register + fork heartbeat on startup. Without it, serve unregistered as today.
-3. Client: fingerprint pinning — after `connectTls`, compare the peer cert SHA-256 against `ServiceInfo` meta when present; mismatch → try next candidate.
-4. Tests: JSON encode/decode round-trips; `discoverServices` against a minimal stub HTTP server (raw socket returning a canned Consul response); malformed-response handling.
+2. `app/Main.hs`: `--registry <url>` flag (or `MODELMIRRORS_REGISTRY` env var) on `--server`; require a computable cert fingerprint, register + fork heartbeat on startup, deregister best-effort on shutdown. Without a registry, serve unregistered as today.
+3. New module `src/Protocol/Discover.hs`: `tryCandidates` (try discovered candidates in order, concatenating diagnostics on total failure) and `candidateFingerprint` (explicit `--pin` wins over registry metadata).
+4. `validate --registry <url>`: mTLS-only discovery through `Protocol.ValidateOpts` registry mode; try each candidate with `connectTlsPinned`/`connectTls`, exiting 2 if none is reachable.
+5. Tests: JSON encode/decode round-trips; `discoverServices` against a minimal stub HTTP server (raw socket returning a canned Consul response); malformed-response handling; parser tests for registry/direct-mode exclusivity.
 
 Gate: full flow demo — start server with `--registry` against a local Consul dev agent, client discovers by name, verifies fingerprint, completes mTLS handshake, runs a `Register` session.
 

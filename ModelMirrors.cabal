@@ -81,9 +81,11 @@ library
         MinimalTraceCheck,
         Protocol.Client,
         Protocol.Core,
+        Protocol.Discover,
         Protocol.Mirror,
         Protocol.Format.Json,
         Protocol.Registry,
+        Protocol.ServerOpts,
         Protocol.Transport.Core,
         Protocol.Transport.Mock,
         Protocol.Transport.Stdio,
@@ -116,7 +118,8 @@ library
         tls               >=2.0,
         crypton           >=1.0,
         crypton-x509      >=1.9,
-        crypton-x509-store >=1.9
+        crypton-x509-store >=1.9,
+        crypton-x509-validation >=1.9
 
     if !os(windows)
         build-depends:
@@ -216,4 +219,5 @@ test-suite ModelMirrors-test
         tasty-quickcheck >=0.10,
         tasty-hunit >=0.10,
         text        >=1.2,
+        tls         >=2.0,
         ModelMirrors
