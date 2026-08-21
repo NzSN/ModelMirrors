@@ -139,9 +139,11 @@ Rationale: everything validated *before* `job_accepted` stays a register error, 
 
 ```haskell
 data JobStore = JobStore
-  { jsJobs    :: MVar (Map JobId JobHandle)
-  , jsSlots   :: QSemN            -- bounds concurrent apalache processes
-  , jsCounter :: IORef Int        -- JobId = "job-<n>", unique per store
+  { jsJobs     :: MVar (Map JobId JobHandle)
+  , jsSlots    :: QSemN           -- bounds concurrent apalache processes
+  , jsCounter  :: IORef Int       -- JobId = "job-<n>", unique per store
+  , jsRegistry :: Registry        -- Resource.Registry (shipped): every job resource is
+                                  -- acquireIn'd here; session close = forceReleaseAll
   }
 
 data JobHandle = JobHandle
@@ -149,25 +151,34 @@ data JobHandle = JobHandle
   , jhPhase  :: TVar JobPhase
   , jhResult :: MVar JobOutcome   -- written exactly once, at terminal transition
   , jhThread :: ThreadId
-  , jhSpec   :: SpecHandle        -- owned spec resource (§11); released at terminal transition
-  , jhDir    :: FilePath          -- job-private temp dir (run dir + trace files)
+  , jhSpec   :: Resource SpecRes               -- acquireSpec (shipped), registered (§11)
+  , jhRunDir :: Resource FilePath              -- acquireSessionDir (shipped), registered
+  , jhProc   :: Maybe (Resource ProcessHandle) -- spawnApalache (shipped) while running;
+                                               -- release = idempotent terminate+wait (§6)
   }
 ```
 
 Lifecycle:
 
-1. **Submit** (session thread): pre-checks → create handle → `forkIO` job body →
-   `sendMsg (JobAccepted …)` → return to the session loop *immediately*.
+1. **Submit** (session thread): pre-checks → acquire the spec and run dir via
+   `acquireIn jsRegistry` (`acquireSpec` / `acquireSessionDir` — registration is
+   atomic with acquisition, so no leak window and nothing to forget) → create handle
+   → `forkIO` job body → `sendMsg (JobAccepted …)` → return to the session loop
+   *immediately*. Any failure before `job_accepted` → `register_error`, and the
+   just-acquired resources are released in place.
 2. **Run** (job thread): acquire `jsSlots` (phase `JobPending` → `JobRunning`),
-   call the *existing* `validateSpecIn` / `generateTraceFilesIn` (no Apalache-layer
-   changes for the base design), write `jhResult`, set terminal phase, release slot.
+   invoke apalache via `spawnApalache` and keep the returned
+   `Resource ProcessHandle` in `jhProc` (registered too, so force-release kills
+   the child) → write `jhResult`, set terminal phase, release slot.
 3. **Collect**: `query_job` is non-blocking (`JobStatus`, plus `JobResult` when
    terminal). `await_job` blocks server-side on `jhResult` with optional timeout;
    timeout → `JobStatus` with the current phase. Terminal delivery is idempotent
    within the session (result retained; see GC).
-4. **GC**: the job temp dir and slot are freed when the terminal result is first
-   delivered *or* when the session ends. Session close with jobs still running →
-   `killThread` + directory cleanup (same best-effort caveat as cancellation, §6).
+4. **GC**: targeted `release` of `jhSpec`/`jhRunDir` when the terminal result
+   is first delivered; `forceReleaseAll jsRegistry` at session close covers anything
+   still live — LIFO (process handle before spec/run dirs), total, idempotent.
+   Running jobs: `release jhProc` terminates the apalache child (§6), then
+   `killThread jhThread`. The module-wide GC finalizer is the last-resort backstop.
 5. **Scoping**: v1 store is **per session** (created by the session entry point).
    Documented extension: a server-wide store passed into a new serve wrapper enables
    submit-on-one-connection / poll-on-another; existing serve functions stay as-is.
@@ -220,15 +231,22 @@ data MkJobCancel t = MkJobCancel t JobStore JobId
 New exported wrappers: `runMirrorValidateAsync`, `runMirrorGenTracesAsync`
 (signatures mirror `runMirrorValidate` / `runMirrorGenTracesWithSpec`, plus the store).
 
-## 6. Cancellation (designed, marked best-effort in v1)
+## 6. Cancellation
 
-`cancel_job` → phase `JobCancelled`, `killThread jhThread`, free slot and temp
-dir, reply `job_status {phase:"cancelled"}`. Caveat: killing the Haskell thread
-does not kill the spawned `apalache-mc` child, because `Apalache.Command` uses
-`readCreateProcessWithExitCode`. True cancellation is a documented extension point:
-*add* `validateSpecInAsync` / `generateTraceFilesInAsync` to `Apalache.Command`
-returning the `ProcessHandle` (additive; existing wrappers delegate to them). v1
-ships with best-effort cancel and this limitation documented.
+`cancel_job` → phase `JobCancelled`, `release jhProc` (the
+`Resource ProcessHandle` from `spawnApalache`: idempotent
+`terminateProcess` + `waitForProcess`, safe if the child already exited),
+`killThread jhThread`, targeted `release` of the job's spec/run-dir resources,
+free the slot, reply `job_status {phase:"cancelled"}`.
+
+This supersedes the original "best-effort v1" caveat in this section: the
+resource-model implementation (docs/resource-model-design.md §4 B1, **shipped**)
+already provides exactly the process handle the old text listed as a future
+extension point — no `validateSpecInAsync`/`generateTraceFilesInAsync` variants
+are needed; job bodies simply run `spawnApalache` and keep the handle. What
+remains best-effort: an apalache child that ignores SIGTERM — `release` is total,
+so mirror-side cleanup still completes, at worst leaving a stray grandchild to the
+OS.
 
 ## 7. Client API (`Protocol.Client`, additive)
 
@@ -277,90 +295,85 @@ the sync runners), `Right jobId` on `job_accepted`.
 | `src/Protocol/AsyncJobs.hs` | **new module**: JobStore, JobHandle, submit/query/await/cancel/GC |
 | `src/Protocol/Mirror.hs` | +MirrorStep ctors, +5 Step instances, +`runAsyncSession`, +2 wrappers |
 | `src/Protocol/Client.hs` | +7 client functions (§7) |
-| `src/Apalache/Command.hs` | (extension, cancel v2) +`*Async` variants exposing ProcessHandle |
+| `src/Resource.hs` | (shipped) `Registry`/`acquireIn`/`forceReleaseAll` back the `JobStore`; no changes needed |
+| `src/Apalache/Command.hs` | (shipped) `spawnApalache` gives job bodies a `Resource ProcessHandle` (§6); no further changes needed |
+| `src/Apalache/SpecSource.hs` | (shipped) `acquireSpec`/`acquireSessionDir` used by job submit; no changes needed |
 | `app/Main.hs` | none for v1 (stdio default may later opt into `runAsyncSession`; serve wrappers unchanged) |
 | `test/Main.hs` | +async cases per §9 |
 
 ## 11. Resource lifecycle model — shared semantics for sync and async
 
-### 11.1 What the code has today (and why it is not enough for async)
+> **Revised** to build directly on the **shipped** enforced-RAII model
+> (`docs/resource-model-design.md`, module `Resource`). The ad-hoc
+> `SpecHandle`/`TraceSet`/`Provenance` sketch from the previous revision of
+> this section is superseded: spec dirs, run dirs, and processes are now
+> `Resource` values, and the old `SpecHandle` role maps onto
+> `Resource SpecRes`.
 
-Current modeling is **acquire/release pairs under lexical brackets**, not handles:
+### 11.1 Why lexical brackets alone are not enough for async
 
-- Spec content: `ApalacheSpec` (pure data, no life).
-- Spec on disk: `materializeSpec` / `removeSpecDir` pair; the only caller is
-  `withSpecDir` (`Protocol.Mirror`), which brackets the dir to one synchronous
-  register handler.
-- Run dir: `withSessionDir` = `withSystemTempDirectory`, bracketed to the sync flow.
-- Trace files: live inside the session bracket, or are copied to a client `destPath`
-  and **abandoned** (ownership passes to the caller; the mirror never deletes them).
-- The single existing handle is `Explorer` (`newExplorer` / `exploreDispose`) —
-  the precedent this design generalizes.
+The sync paths manage resources with brackets — now enforced brackets, re-based on
+the Resource model (as built: `withSpecDir` = `acquireSpec` + `finally`/
+`release`; `withSessionDir` and `withApalacheServer` = `Resource.with`).
+Lexical scopes close when `JobAccepted` is sent, so async cannot reuse them
+directly: an async job's resources must outlive the request that created them and
+die with a *dynamic* event (terminal transition, session close). That is exactly
+the Resource model's second discipline: a per-session `Registry` with
+`acquireIn` + `forceReleaseAll`. One ownership vocabulary, two scoping
+disciplines — sync keeps the brackets, async registers.
 
-Lexical brackets close when `JobAccepted` is sent, so async cannot reuse them
-directly. The fix is a first-class ownership model that sync wraps in brackets and
-async stores in the `JobHandle` — one set of semantics, two scoping disciplines.
+### 11.2 Resource vocabulary the async paths use (all shipped except the trace set)
 
-### 11.2 New concepts (additive; `Apalache.Resources` or inside `Protocol.AsyncJobs`)
+| Role | Shipped API | Notes |
+|---|---|---|
+| Spec | `acquireSpec :: Maybe ApalacheSpec -> ApalacheConfig -> IO (Either Text (Resource SpecRes, ApalacheConfig))` (`Apalache.SpecSource`) | `SpecRes{specResDir, specResRootPath, specResProvenance}`; `Provenance` (`Owned`/`Borrowed`) is the canonical `Resource.Provenance`, re-exported by `SpecSource`. `Borrowed` cleanup is a no-op by construction — the client's own `specPath` is never deleted. |
+| Run dir | `acquireSessionDir :: IO (Resource FilePath)` (`Apalache.SpecSource`) | cleanup = `removeDirectoryRecursive` |
+| Process | `spawnApalache :: … -> IO (…, Resource ProcessHandle)` (`Apalache.Command`) | idempotent `terminateProcess`+`waitForProcess` cleanup; the basis of cancellation (§6) |
+| Trace set | **future**: `TraceSetRes` + `acquireTraceSet` (deferred — resource-model Appendix A item 8) | the old `TraceSetState` maps onto `ResourceState`: `Live`→`Live`; `Delivered`→`Resource.transfer` at the `destPath` copy; `Released`→`Resource.release` |
 
-```haskell
-data SpecHandle = SpecHandle
-  { shPath       :: !FilePath        -- root .tla path to hand to apalache
-  , shDir        :: !(Maybe FilePath) -- temp dir to release, if owned
-  , shProvenance :: !Provenance
-  }
+All `Resource` operations are idempotent and total; `release` is CAS
+at-most-once; forgotten releases are caught by the registry (dynamic scope) or the
+GC finalizer backstop (`leak:` log).
 
-data Provenance = Owned | Borrowed
-  -- Owned:    materialized from an inline ApalacheSpec; mirror must delete.
-  -- Borrowed: client's own specPath (Nothing spec); mirror must NEVER delete.
+### 11.3 Sync semantics (as built — unchanged behavior, enforced basis)
 
-data TraceSet = TraceSet
-  { tsId      :: !Int
-  , tsDir     :: !FilePath           -- outDir containing the .itf.json files
-  , tsPaths   :: ![FilePath]
-  , tsState   :: !(TVar TraceSetState)
-  }
+Already shipped with the resource model: `withSpecDir` (`acquireSpec` +
+`finally`/`release`), `withSessionDir` and `withApalacheServer`
+(`Resource.with`) — signatures and observable behavior byte-identical, including
+the `destPath` copy-then-disclaim in `MkRunMirrorGenTraces` (which becomes an
+explicit `Resource.transfer` when `TraceSetRes` lands).
 
-data TraceSetState
-  = Live          -- files exist under mirror-owned dir; mirror must clean
-  | Delivered     -- copied to client destPath; ownership disclaimed (today's behavior)
-  | Released      -- cleaned; any further use is a bug
-```
+### 11.4 Async semantics (the session registry owns the resources)
 
-Operations: `acquireSpec :: Maybe ApalacheSpec -> ApalacheConfig -> IO (Either Text (SpecHandle, ApalacheConfig))`
-(returns the config with `specPath` overridden when materialized), `releaseSpec`,
-`releaseTraceSet`, `markDelivered`. All are idempotent; release of a `Borrowed`
-spec is a no-op by construction.
-
-### 11.3 Sync semantics (unchanged behavior, new implementation basis)
-
-`withSpecDir` / `withSessionDir` become thin brackets over `acquireSpec` /
-`releaseSpec`: acquire at handler entry, release on exit (normal or exceptional).
-The sync flow's observable behavior — including the `destPath` copy that marks the
-`TraceSet` `Delivered` — is byte-identical to today.
-
-### 11.4 Async semantics (the job handle owns the resources)
-
-- **Submit** (session thread): `acquireSpec` succeeds → create job resources; the
-  `SpecHandle` and a job-private run dir move into the `JobHandle`
-  (`jhSpec`, `jhDir`). Failure → `register_error`, nothing acquired.
-- **Run** (job thread): apalache runs against `shPath` with cwd/run-dir `jhDir`.
-  For gen-traces, completion creates the `TraceSet`; a `destPath` copy transitions
-  it to `Delivered` (session dir portion still released).
-- **Terminal transition** (done/failed/cancelled): result delivered → release
-  `Owned` spec dir and run dir. Validate jobs own no `TraceSet`.
-- **Session close / server shutdown**: the `JobStore` registry force-releases every
-  live handle (kill thread → release spec/run dirs). `Delivered` trace sets are
+- **Submit** (session thread): `acquireIn jsRegistry` the spec (`acquireSpec`)
+  and run dir (`acquireSessionDir`) — acquire+register is atomic, so there is no
+  leak window and nothing to remember. Failure → `register_error`; anything
+  acquired is released in place.
+- **Run** (job thread): apalache via `spawnApalache` against
+  `specResRootPath` with cwd/run-dir from the run-dir resource; the process
+  handle lives in `jhProc` (also registered). For gen-traces, completion
+  produces the trace set; a `destPath` copy is a `transfer`
+  (Delivered — ownership disclaimed); the run-dir portion is still released.
+- **Terminal transition** (done/failed/cancelled): result delivered → targeted
+  `release` of the job's spec/run-dir/process resources. Validate jobs own no
+  trace set.
+- **Session close / server shutdown**: `forceReleaseAll jsRegistry` — LIFO
+  (process before spec/run dirs), total, idempotent. `Delivered` trace sets are
   never touched — same abandonment semantics as the sync path.
-- **Cancellation** (§6): cancel = terminal transition, so cleanup rides the same path;
-  the apalache child-process caveat applies unchanged.
+- **Cancellation** (§6): cancel is a terminal transition riding the same
+  mechanics — `release jhProc` kills the apalache child for real.
 
-### 11.5 Invariants (both paths)
+### 11.5 Invariants (both paths) — as enforced by the Resource model
 
-1. Every `Owned` `SpecHandle` is released exactly once — by bracket (sync) or by
-   terminal transition / force-release (async).
-2. A `Borrowed` spec path is never deleted by the mirror, on any path.
-3. A `TraceSet` leaves the mirror's ownership exactly once: `Released` (mirror
-   temp) xor `Delivered` (client `destPath`), never both.
-4. No job thread outlives its session: session close implies force-release, so temp
-   dirs cannot leak past the connection that created them.
+1. Every `Owned` spec resource is released **at most once** (CAS on the state
+   cell) and **at least once** — by enforced bracket (sync) or by terminal
+   transition / `forceReleaseAll` (async); a forgotten release is reclaimed and
+   logged by the GC finalizer backstop.
+2. A `Borrowed` spec path is never deleted by the mirror, on any path — its
+   cleanup is a no-op by construction (`Resource.Provenance`).
+3. A trace set leaves the mirror's ownership exactly once: `release` (mirror
+   temp) xor `transfer` (client `destPath`), enforced by the
+   `ResourceState` machine — never both.
+4. No job resource outlives its session: session close implies
+   `forceReleaseAll`, so temp dirs and apalache children cannot leak past the
+   connection that created them.
