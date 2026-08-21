@@ -1,8 +1,10 @@
 # Async Operations Design — Validate-Only and Trace-Generation-Only Paths
 
-Status: **design only, no implementation**. Purely additive: every element below is a
-*new* constructor, wire tag, function, or module. No existing constructor, wire tag,
-function, session flow, or behavior is modified.
+Status: **implemented** — all elements below are shipped in the library and covered
+by the test suite (`cabal build all` + `LC_ALL=C.UTF-8 cabal test all` green,
+191 tests; see §12 for implementation notes and deliberate deviations). Purely
+additive: every element below is a *new* constructor, wire tag, function, or module.
+No existing constructor, wire tag, function, session flow, or behavior is modified.
 
 ## 1. Background: the two synchronous paths today
 
@@ -51,7 +53,9 @@ data JobPhase = JobPending            -- accepted, waiting for a worker slot
 data JobOutcome                       -- payload mirrors the sync reply exactly
   = JobValidateDone  !ValidateResult              -- == SpecValidated v
   | JobGenTracesDone ![FilePath] ![TraceContent]  -- == GenTracesDone paths contents
-  | JobFailed        !Text                        -- apalache infrastructure error
+  | JobInfraError    !Text                        -- apalache infrastructure error
+  -- (named JobInfraError, not JobFailed: JobPhase already has a JobFailed
+  -- constructor and Haskell shares the constructor namespace; wire: {"error": …})
 
 -- ClientMessage additions
 -- | RegisterValidateAsync  !ApalacheConfig !Int !(Maybe ApalacheSpec)
@@ -126,9 +130,9 @@ thread, so the delivered outcome is identical to the sync reply.
 | bound outside `1..100` | `register_error` | `register_error` (before `job_accepted`) |
 | spec materialization failure | `register_error` | `register_error` (before `job_accepted`) |
 | server at job capacity | — | `register_error` "job queue full" (before `job_accepted`) |
-| apalache infrastructure error (exit 255, missing binary) | `register_error` | `job_result` with `JobFailed` |
+| apalache infrastructure error (exit 255, missing binary) | `register_error` | `job_result` with `JobInfraError` |
 | typecheck failure / invariant violation | `spec_validated {invalid}` | `job_result` with `JobValidateDone (SpecInvalid e)` |
-| trace parse failure in readback | `register_error` | `job_result` with `JobFailed` |
+| trace parse failure in readback | `register_error` | `job_result` with `JobInfraError` |
 | unknown `jobId` in query/await/cancel | — | `job_status {phase:"unknown"}` (in-band, no exception) |
 
 Rationale: everything validated *before* `job_accepted` stays a register error, so
@@ -280,7 +284,7 @@ the sync runners), `Right jobId` on `job_accepted`.
   *injected fake job body* (job body parameterized in `Protocol.AsyncJobs` so tests
   need no apalache); assert step logs via `normalizeMirrorSteps`.
 - Error tiers: bad bound and materialization failure → `register_error` pre-accept;
-  forced apalache failure → `JobFailed` post-accept; unknown jobId → `JobUnknown`.
+  forced apalache failure → `JobInfraError` post-accept; unknown jobId → `JobUnknown`.
 - Concurrency: `maxAsyncJobs=1` serializes two submits; session-close GC kills a
   running job.
 - Integration: HourClock async validate + async trace-gen against real apalache,
@@ -377,3 +381,40 @@ explicit `Resource.transfer` when `TraceSetRes` lands).
 4. No job resource outlives its session: session close implies
    `forceReleaseAll`, so temp dirs and apalache children cannot leak past the
    connection that created them.
+
+## 12. Implementation notes (post-implementation sync)
+
+The feature shipped as specified above, with the following deliberate deviations
+and discoveries:
+
+1. **`JobInfraError` naming** (§2): the infra-error `JobOutcome` constructor is
+   `JobInfraError`, not `JobFailed`, because `JobPhase` already occupies the
+   `JobFailed` constructor name. The wire tag is `{"error": …}` as specified.
+   (The doc body above already uses the shipped name.)
+2. **Capacity model** (§4, §9): the separate `maxAsyncJobs` bound is implemented
+   as `jsCapacity` on the `JobStore` — slots = capacity = queue bound. At
+   capacity a submit is rejected *pre-accept* with `register_error`
+   "job queue full" rather than queued for later serialization; a resubmit
+   after a running job completes is accepted. The §9 concurrency tests assert
+   this implemented semantics.
+3. **`jhProc` representation** (§4): the process-handle slot is an
+   `IORef (Maybe (Resource ProcessHandle))`, not a plain `Maybe` — the job
+   thread fills it after `spawnApalache` while cancel/session-close read it
+   concurrently. All cancel/close paths go through `cancelJob`/`closeJobStore`;
+   nothing touches `jhProc` directly.
+4. **`maxValidateBound` location**: the constant (value unchanged: 100) lives in
+   `Protocol.AsyncJobs` and `Protocol.Mirror` delegates to it, avoiding a
+   module-import cycle.
+5. **Bug fix found by the async integration tests**: `generateTraceFilesVia`
+   (`Apalache.Command`) did not absolutize a relative `specPath` when a run dir
+   is set (`validateSpecVia` did). Async gen-traces exposed this because
+   `spawnApalacheIn` pins the child cwd to the job run dir. Fixed for parity;
+   observable sync behavior is unchanged for absolute paths.
+6. **Behavior-preserving refactors**: `spawnApalacheWith` (`Apalache.Command`)
+   and `acquireSpecWith` (`Apalache.SpecSource`) were extracted as shared
+   workers behind the existing exported signatures; no wire, flow, or
+   signature changes.
+7. **Tests**: `test/Protocol/AsyncJobsSpec.hs` (11 tests) implements §9 in
+   full — MockTransport round-trips with injected fake job bodies, error tiers,
+   concurrency/GC, and HourClock async integration alongside the sync cases.
+

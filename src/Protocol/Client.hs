@@ -7,6 +7,13 @@ module Protocol.Client
   , runClientGenTracesWithSpec
   , runClientExplore
   , runClientValidate
+  , submitValidateAsync
+  , submitGenTracesAsync
+  , pollJob
+  , awaitJob
+  , cancelJob
+  , runClientValidateAsync
+  , runClientGenTracesAsync
   , exploreSession
   , cannedClient
   , fixedClient
@@ -20,7 +27,15 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Protocol.Core (ClientMessage (..), MirrorMessage (..), renderDiffHints)
+import Protocol.Core
+  ( ClientMessage (..)
+  , JobId
+  , JobOutcome (..)
+  , JobPhase (..)
+  , MirrorMessage (..)
+  , TraceContent
+  , renderDiffHints
+  )
 import Protocol.Format.Json ()
 import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
 
@@ -87,6 +102,127 @@ runClientValidate transport cfg bound mSpec = do
     Right (RegisterError e)    -> pure (Left e)
     Right (ProtocolError e)    -> pure (Left e)
     Right _ -> pure (Left (T.pack "Unexpected message: expected SpecValidated"))
+
+--------------------------------------------------------------------------------
+-- Async job client API (submit -> poll / long-poll)
+--------------------------------------------------------------------------------
+
+-- | Submit a validate-only job. Returns @Right jobId@ on @job_accepted@;
+-- @Left@ on @register_error@ / @protocol_error@ / transport failure (same
+-- error mapping as the sync runners).
+submitValidateAsync :: Transport t => t -> ApalacheConfig -> Int -> Maybe ApalacheSpec -> IO (Either Text JobId)
+submitValidateAsync transport cfg bound mSpec = do
+  sendMsg transport (RegisterValidateAsync cfg bound mSpec)
+  recvMsg transport >>= \case
+    Left err                    -> pure (Left (T.pack err))
+    Right (JobAccepted jobId _) -> pure (Right jobId)
+    Right (RegisterError e)     -> pure (Left e)
+    Right (ProtocolError e)     -> pure (Left e)
+    Right _ -> pure (Left (T.pack "Unexpected message: expected JobAccepted"))
+
+-- | Submit a trace-generation-only job. Same result mapping as
+-- 'submitValidateAsync'.
+submitGenTracesAsync :: Transport t => t -> ApalacheConfig -> TraceGenerationConfig -> Maybe FilePath -> Maybe ApalacheSpec -> IO (Either Text JobId)
+submitGenTracesAsync transport cfg tc destPath mSpec = do
+  sendMsg transport (RegisterGenTracesAsync cfg tc destPath mSpec)
+  recvMsg transport >>= \case
+    Left err                    -> pure (Left (T.pack err))
+    Right (JobAccepted jobId _) -> pure (Right jobId)
+    Right (RegisterError e)     -> pure (Left e)
+    Right (ProtocolError e)     -> pure (Left e)
+    Right _ -> pure (Left (T.pack "Unexpected message: expected JobAccepted"))
+
+-- | Non-blocking poll: the job's current phase, plus its outcome when the
+-- job has already reached a terminal phase.
+pollJob :: Transport t => t -> JobId -> IO (Either Text (JobPhase, Maybe JobOutcome))
+pollJob transport jobId = do
+  sendMsg transport (QueryJob jobId)
+  recvMsg transport >>= \case
+    Left err                    -> pure (Left (T.pack err))
+    Right (JobStatus _ phase)   -> pure (Right (phase, Nothing))
+    Right (JobResult _ outcome) -> pure (Right (terminalPhaseOf outcome, Just outcome))
+    Right (RegisterError e)     -> pure (Left e)
+    Right (ProtocolError e)     -> pure (Left e)
+    Right _ -> pure (Left (T.pack "Unexpected message: expected JobStatus or JobResult"))
+
+-- | Long-poll: blocks server-side (with optional timeout in seconds) and
+-- loops on @job_status@ until the job's result arrives. On server-side
+-- timeout the current phase comes back as @job_status@ and the client
+-- simply re-awaits.
+awaitJob :: Transport t => t -> JobId -> Maybe Int -> IO (Either Text JobOutcome)
+awaitJob transport jobId mTimeout = do
+  sendMsg transport (AwaitJob jobId mTimeout)
+  recvMsg transport >>= \case
+    Left err                    -> pure (Left (T.pack err))
+    Right (JobResult _ outcome) -> pure (Right outcome)
+    Right (JobStatus _ phase)
+      | isTerminalPhase phase    -> pollUntilResult
+      | otherwise                -> awaitJob transport jobId mTimeout
+    Right (RegisterError e)     -> pure (Left e)
+    Right (ProtocolError e)     -> pure (Left e)
+    Right _ -> pure (Left (T.pack "Unexpected message: expected JobStatus or JobResult"))
+  where
+    -- Terminal phase seen without a result (the result raced the status
+    -- reply): one-shot poll to pick up the retained result.
+    pollUntilResult = do
+      r <- pollJob transport jobId
+      pure $ case r of
+        Left e                -> Left e
+        Right (_, Just o)     -> Right o
+        Right (phase, Nothing)
+          | phase == JobUnknown -> Left (T.pack "job result lost: unknown job")
+          | otherwise           -> Left (T.pack "job terminal without delivered result")
+
+-- | Request cancellation of a job. Succeeds once the mirror acknowledges
+-- with a @job_status@ reply.
+cancelJob :: Transport t => t -> JobId -> IO (Either Text ())
+cancelJob transport jobId = do
+  sendMsg transport (CancelJob jobId)
+  recvMsg transport >>= \case
+    Left err                  -> pure (Left (T.pack err))
+    Right (JobStatus _ _)     -> pure (Right ())
+    Right (RegisterError e)   -> pure (Left e)
+    Right (ProtocolError e)   -> pure (Left e)
+    Right _ -> pure (Left (T.pack "Unexpected message: expected JobStatus"))
+
+isTerminalPhase :: JobPhase -> Bool
+isTerminalPhase phase = phase `elem` [JobDone, JobFailed, JobCancelled, JobUnknown]
+
+terminalPhaseOf :: JobOutcome -> JobPhase
+terminalPhaseOf = \case
+  JobValidateDone _    -> JobDone
+  JobGenTracesDone _ _ -> JobDone
+  JobInfraError _      -> JobFailed
+
+-- | Drop-in async equivalent of 'runClientValidate': submit, await, and
+-- return the same result shape as the synchronous one-shot.
+runClientValidateAsync :: Transport t => t -> ApalacheConfig -> Int -> Maybe ApalacheSpec -> IO (Either Text ValidateResult)
+runClientValidateAsync transport cfg bound mSpec = do
+  r <- submitValidateAsync transport cfg bound mSpec
+  case r of
+    Left err -> pure (Left err)
+    Right jobId -> do
+      res <- awaitJob transport jobId Nothing
+      pure $ case res of
+        Left err                  -> Left err
+        Right (JobValidateDone v) -> Right v
+        Right (JobInfraError e)   -> Left e
+        Right _ -> Left (T.pack "Unexpected job outcome: expected validate result")
+
+-- | Drop-in async equivalent of 'runClientGenTracesWithSpec': submit,
+-- await, and return @Right (paths, traceContents)@.
+runClientGenTracesAsync :: Transport t => t -> ApalacheConfig -> TraceGenerationConfig -> Maybe FilePath -> Maybe ApalacheSpec -> IO (Either Text ([FilePath], [TraceContent]))
+runClientGenTracesAsync transport cfg tc destPath mSpec = do
+  r <- submitGenTracesAsync transport cfg tc destPath mSpec
+  case r of
+    Left err -> pure (Left err)
+    Right jobId -> do
+      res <- awaitJob transport jobId Nothing
+      pure $ case res of
+        Left err                       -> Left err
+        Right (JobGenTracesDone ps cs) -> Right (ps, cs)
+        Right (JobInfraError e)        -> Left e
+        Right _ -> Left (T.pack "Unexpected job outcome: expected trace generation result")
 
 exploreSession :: Transport t => t -> ApalacheSpec -> [Text] -> [Text] -> IO (Either Text (Int, Int, Int))
 exploreSession t spec invs exports = do

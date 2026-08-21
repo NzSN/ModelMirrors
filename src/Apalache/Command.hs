@@ -8,6 +8,10 @@ module Apalache.Command
   , apalacheBin
   , ApalacheResult (..)
   , spawnApalache
+  , spawnApalacheIn
+  , SpawnRunner
+  , validateSpecVia
+  , generateTraceFilesVia
   ) where
 
 import Apalache.Types
@@ -24,7 +28,14 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (SomeException, evaluate, try)
 import qualified Data.Text as T
-import Resource (Resource, acquire)
+import Data.Functor.Identity (Identity (..))
+import Resource
+  ( Registry
+  , Resource
+  , acquire
+  , acquireIn
+  , resourceErrorText
+  )
 import System.Directory (makeAbsolute)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
@@ -217,34 +228,131 @@ data ApalacheResult = ApalacheResult
   , arStdErr   :: !String
   } deriving (Show, Eq)
 
--- | Run one apalache invocation (the binary resolved by 'apalacheBin') and
--- return its full outcome alongside a 'Resource ProcessHandle'. The handle's
--- cleanup is idempotent 'terminateProcess'+'waitForProcess': terminating an
--- already-exited child is a no-op and 'waitForProcess' returns the recorded
--- exit code immediately, so releasing after completion (or dropping the
--- handle) is safe. This is the wrapper the async job model will use to close
--- the cancellation kill-window; the existing 'validateSpecIn'/'generateTracesIn'/
--- 'generateTraceFilesIn' helpers are unchanged.
-spawnApalache :: [String] -> IO (ApalacheResult, Resource ProcessHandle)
-spawnApalache args = do
+-- | Shared worker behind 'spawnApalache' and 'spawnApalacheIn': identical
+-- process setup and cleanup; only the acquire flavor (plain @acquire@ vs
+-- registry-registered @acquireIn@) differs, so the idempotent
+-- terminate+wait cleanup stays single-sourced.
+spawnApalacheWith
+  :: Functor f
+  => (forall a. T.Text -> IO a -> (a -> IO ()) -> IO (f (Resource a)))
+  -> Maybe FilePath
+  -> [String]
+  -> IO (f (ApalacheResult, Resource ProcessHandle))
+spawnApalacheWith acq runDir args = do
   bin <- apalacheBin
   (_, mOut, mErr, ph) <-
     createProcess (proc bin args)
-      { std_in = NoStream, std_out = CreatePipe, std_err = CreatePipe }
+      { cwd = runDir, std_in = NoStream, std_out = CreatePipe, std_err = CreatePipe }
   case (mOut, mErr) of
     (Just hOut, Just hErr) -> do
-      res <- acquire (T.pack "apalache-process") (pure ph) stopApalacheProcess
+      fRes <- acq (T.pack "apalache-process") (pure ph) stopApalacheProcess
       (out, err) <- drainOutputs hOut hErr
       hClose hOut
       hClose hErr
       exitCode <- waitForProcess ph
-      pure (ApalacheResult exitCode out err, res)
+      pure (fmap (\res -> (ApalacheResult exitCode out err, res)) fRes)
     _ -> do
       -- Unreachable (we asked for CreatePipe), but be defensive so the
       -- launched process is never left running.
       _ <- try (terminateProcess ph) :: IO (Either SomeException ())
       _ <- try (waitForProcess ph) :: IO (Either SomeException ExitCode)
       ioError (userError "spawnApalache: expected stdout/stderr pipes from createProcess")
+
+-- | Run one apalache invocation (the binary resolved by 'apalacheBin') and
+-- return its full outcome alongside a 'Resource ProcessHandle'. The handle's
+-- cleanup is idempotent 'terminateProcess'+'waitForProcess': terminating an
+-- already-exited child is a no-op and 'waitForProcess' returns the recorded
+-- exit code immediately, so releasing after completion (or dropping the
+-- handle) is safe. This is the wrapper the async job model uses to close
+-- the cancellation kill-window; the existing 'validateSpecIn'/'generateTracesIn'/
+-- 'generateTraceFilesIn' helpers are unchanged.
+spawnApalache :: [String] -> IO (ApalacheResult, Resource ProcessHandle)
+spawnApalache args = do
+  r <- spawnApalacheWith (\l g c -> Identity <$> acquire l g c) Nothing args
+  pure (runIdentity r)
+
+-- | Registry-registered form of 'spawnApalache' for the async job model:
+-- the process handle is registered in the given 'Registry' atomically with
+-- acquisition (session close force-releases it, killing the child), and the
+-- child runs with @cwd = runDir@ when given (same isolation as
+-- 'validateSpecIn'). Registry failures are surfaced through the @Text@
+-- error channel (the job turns them into a 'JobInfraError').
+spawnApalacheIn :: Registry -> Maybe FilePath -> [String] -> IO (Either T.Text (ApalacheResult, Resource ProcessHandle))
+spawnApalacheIn reg runDir args = do
+  r <- spawnApalacheWith (acquireIn reg) runDir args
+  pure (either (Left . resourceErrorText) Right r)
+
+-- | An injected apalache invocation used by the async job model (and tests):
+-- run one invocation for the given argument list and return its outcome
+-- without the process handle. The async job closes over its registry, run
+-- dir, and an @on-spawn@ observer (recording the process resource so
+-- 'cancel' can release it) when building a 'SpawnRunner' from
+-- 'spawnApalacheIn'.
+type SpawnRunner = [String] -> IO (Either T.Text ApalacheResult)
+
+-- | 'validateSpecIn' re-expressed over an injected 'SpawnRunner': the
+-- argument construction (including specPath absolutization), the two-phase
+-- typecheck-then-check flow, and the exit-code classification (255 ->
+-- 'Left' infra error; other nonzero -> 'Right' 'SpecInvalid'; 0 -> next
+-- phase/'SpecValid') are identical to 'validateSpecIn'. The async job body
+-- uses this with 'spawnApalacheIn' so cancellation can reach the child
+-- process; behavior classification is preserved verbatim.
+validateSpecVia :: SpawnRunner -> Maybe FilePath -> ApalacheConfig -> Int -> IO (Either ApalacheError ValidateResult)
+validateSpecVia run runDir cfg bound = do
+  cfg' <- case runDir of
+    Just _  -> (\p -> cfg { specPath = p }) <$> makeAbsolute (specPath cfg)
+    Nothing -> pure cfg
+  tc <- run (tcArgs runDir cfg')
+  case tc of
+    Left err -> pure (Left (ApalacheError err))
+    Right (ApalacheResult tcExit tcOut tcErr) ->
+      case tcExit of
+        ExitFailure 255 ->
+          pure (Left (ApalacheError (T.pack (tcOut ++ tcErr))))
+        ExitFailure _ ->
+          pure (Right (SpecInvalid (T.pack (tcOut ++ tcErr))))
+        ExitSuccess -> do
+          c <- run (checkArgs runDir cfg' bound)
+          case c of
+            Left err -> pure (Left (ApalacheError err))
+            Right (ApalacheResult cExit cOut cErr) ->
+              case cExit of
+                ExitFailure 255 ->
+                  pure (Left (ApalacheError (T.pack (cOut ++ cErr))))
+                ExitSuccess ->
+                  pure (Right SpecValid)
+                ExitFailure _ ->
+                  pure (Right (SpecInvalid (T.pack (cOut ++ cErr))))
+
+-- | 'generateTraceFilesIn' re-expressed over an injected 'SpawnRunner': the
+-- argument construction, output-directory parsing, and trace-file discovery
+-- are identical to 'generateTraceFilesIn'; only the invocation mechanism is
+-- injected (the async job body closes over its registry and run dir so the
+-- spawned child is registry-registered and cancellable).
+generateTraceFilesVia :: SpawnRunner -> Maybe FilePath -> ApalacheConfig -> TraceGenerationConfig -> IO (Either ApalacheError (FilePath, [FilePath]))
+generateTraceFilesVia run runDir cfg tc = do
+  -- Same specPath absolutization as 'validateSpecVia': the injected runner
+  -- (spawnApalacheIn) pins the child's cwd to the job run dir, so a relative
+  -- specPath would otherwise resolve against the run dir instead of the
+  -- server's cwd (the sync 'generateTraceFilesIn' inherits the server cwd
+  -- and needs no adjustment; parity is preserved by absolutizing here).
+  cfg' <- case runDir of
+    Just _  -> (\p -> cfg { specPath = p }) <$> makeAbsolute (specPath cfg)
+    Nothing -> pure cfg
+  r <- run (traceArgs runDir cfg' tc)
+  case r of
+    Left err -> pure (Left (ApalacheError err))
+    Right (ApalacheResult exit out err') ->
+      case exit of
+        ExitFailure 255 ->
+          pure (Left (ApalacheError (T.pack (out ++ err'))))
+        _ ->
+          case parseOutputDir (out ++ err') of
+            Nothing ->
+              pure (Left (ApalacheError (T.pack "Could not determine output directory from Apalache output")))
+            Just outDir -> do
+              paths <- findTraceFiles outDir
+              pure (Right (outDir, paths))
 
 -- | Idempotent process stop: 'terminateProcess' then 'waitForProcess', each
 -- guarded so cleanup never throws even when the process already exited.

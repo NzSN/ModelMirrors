@@ -21,6 +21,14 @@ module Protocol.Mirror
   , runMirrorExplore
   , runMirrorExploreSession
   , runMirrorValidate
+  , MkRunValidateAsync (..)
+  , MkRunGenTracesAsync (..)
+  , MkJobQuery (..)
+  , MkJobAwait (..)
+  , MkJobCancel (..)
+  , runMirrorValidateAsync
+  , runMirrorGenTracesAsync
+  , runAsyncSession
   , maxValidateBound
   , run
   ) where
@@ -76,7 +84,24 @@ import Engine.Interactive (makeTransportDriver)
 import Engine.Replay (StateDriver (..))
 import Engine.Types (StepCommand (..), StateDiff (..))
 import qualified Engine.Types as Engine
-import Protocol.Core (ClientMessage (..), MirrorMessage (..))
+import Protocol.AsyncJobs
+  ( JobStore
+  , awaitJob
+  , cancelJob
+  , closeJobStore
+  , queryJob
+  , submitGenTracesJob
+  , submitValidateJob
+  )
+import qualified Protocol.AsyncJobs (maxValidateBound)
+import Protocol.Core
+  ( ClientMessage (..)
+  , JobId (..)
+  , JobKind (..)
+  , JobOutcome (..)
+  , JobPhase (..)
+  , MirrorMessage (..)
+  )
 import Protocol.Format.Json ()
 import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
 import Resource (release, use, with)
@@ -104,6 +129,14 @@ data MirrorStep
   | MirrorSendStepOk !Int
   | MirrorSendStepMismatch !Int !StateDiff
   | MirrorSendAllStepsDone
+  | MirrorRecvRegisterValidateAsync !ApalacheConfig !Int !(Maybe ApalacheSpec)
+  | MirrorRecvRegisterGenTracesAsync !ApalacheConfig !TraceGenerationConfig !(Maybe FilePath) !(Maybe ApalacheSpec)
+  | MirrorRecvJobQuery !JobId
+  | MirrorRecvJobAwait !JobId
+  | MirrorRecvJobCancel !JobId
+  | MirrorSendJobAccepted !JobId !JobKind
+  | MirrorSendJobStatus !JobId !JobPhase
+  | MirrorSendJobResult !JobId !Text
   deriving (Show, Eq)
 
 mirrorStepActionName :: MirrorStep -> Text
@@ -128,6 +161,14 @@ mirrorStepActionName = \case
   MirrorSendStepOk{}              -> T.pack "MirrorSendStepOk"
   MirrorSendStepMismatch{}        -> T.pack "MirrorSendStepMismatch"
   MirrorSendAllStepsDone          -> T.pack "MirrorSendAllStepsDone"
+  MirrorRecvRegisterValidateAsync{}  -> T.pack "MirrorRecvRegisterValidateAsync"
+  MirrorRecvRegisterGenTracesAsync{} -> T.pack "MirrorRecvRegisterGenTracesAsync"
+  MirrorRecvJobQuery{}            -> T.pack "MirrorRecvJobQuery"
+  MirrorRecvJobAwait{}            -> T.pack "MirrorRecvJobAwait"
+  MirrorRecvJobCancel{}           -> T.pack "MirrorRecvJobCancel"
+  MirrorSendJobAccepted{}         -> T.pack "MirrorSendJobAccepted"
+  MirrorSendJobStatus{}           -> T.pack "MirrorSendJobStatus"
+  MirrorSendJobResult{}           -> T.pack "MirrorSendJobResult"
 
 normalizeMirrorSteps :: [MirrorStep] -> [Text]
 normalizeMirrorSteps = go
@@ -145,6 +186,11 @@ data MkRunMirror t = MkRunMirror t ApalacheConfig TraceGenerationConfig (Maybe A
 data MkRunMirrorWithTraces t = MkRunMirrorWithTraces t ApalacheConfig [FilePath]
 data MkRunMirrorGenTraces t = MkRunMirrorGenTraces t ApalacheConfig TraceGenerationConfig (Maybe FilePath) (Maybe ApalacheSpec)
 data MkRunValidate t = MkRunValidate t ApalacheConfig Int (Maybe ApalacheSpec)
+data MkRunValidateAsync t = MkRunValidateAsync t JobStore ApalacheConfig Int (Maybe ApalacheSpec)
+data MkRunGenTracesAsync t = MkRunGenTracesAsync t JobStore ApalacheConfig TraceGenerationConfig (Maybe FilePath) (Maybe ApalacheSpec)
+data MkJobQuery t = MkJobQuery t JobStore JobId
+data MkJobAwait t = MkJobAwait t JobStore JobId (Maybe Int)
+data MkJobCancel t = MkJobCancel t JobStore JobId
 data MkExploreMirror t = MkExploreMirror t ApalacheSpec [Text] [Text] Int
 data MkExploreSession t = MkExploreSession t ApalacheSpec [Text] [Text]
 data MkReplayAll t = MkReplayAll t (StateDriver IO) [ItfTrace]
@@ -295,8 +341,12 @@ readTraceContents ps = fmap sequence (traverse readOne ps)
 -- with a @RegisterError@ before any spec materialization or apalache
 -- invocation, so a remote client cannot force an unbounded (or
 -- nonsensical) bounded check on the mirror.
+-- maxValidateBound now delegates to the single source in
+-- "Protocol.AsyncJobs" (which this module imports for the async Step
+-- instances, so the constant cannot live here without a module cycle).
+-- Same name, same value (100): no signature or behavior change.
 maxValidateBound :: Int
-maxValidateBound = 100
+maxValidateBound = Protocol.AsyncJobs.maxValidateBound
 
 instance Transport t => Step (MkRunValidate t) where
   exec (MkRunValidate transport cfg bound mSpec)
@@ -318,6 +368,146 @@ instance Transport t => Step (MkRunValidate t) where
                 pure [case v of
                         SpecValid     -> MirrorSendSpecValidatedValid
                         SpecInvalid e -> MirrorSendSpecValidatedInvalid e]
+
+
+--------------------------------------------------------------------------------
+-- Async job operations (design §5). The session loop never blocks on
+-- apalache: submits fork through the job store and return immediately;
+-- job operations are answered from the store. Sync registers received
+-- mid-session still run inline (documented §5).
+
+-- | One-word outcome summary for the step log.
+outcomeTag :: JobOutcome -> Text
+outcomeTag = \case
+  JobValidateDone _  -> T.pack "validate"
+  JobGenTracesDone{} -> T.pack "genTraces"
+  JobInfraError _    -> T.pack "error"
+
+instance Transport t => Step (MkRunValidateAsync t) where
+  exec (MkRunValidateAsync transport store cfg bound mSpec) = do
+    r <- submitValidateJob store cfg bound mSpec
+    case r of
+      Left err -> do
+        sendMsg transport (RegisterError err)
+        pure [MirrorSendRegisterError err]
+      Right jid -> do
+        sendMsg transport (JobAccepted jid ValidateJob)
+        pure [MirrorSendJobAccepted jid ValidateJob]
+
+instance Transport t => Step (MkRunGenTracesAsync t) where
+  exec (MkRunGenTracesAsync transport store cfg tc destPath mSpec) = do
+    r <- submitGenTracesJob store cfg tc destPath mSpec
+    case r of
+      Left err -> do
+        sendMsg transport (RegisterError err)
+        pure [MirrorSendRegisterError err]
+      Right jid -> do
+        sendMsg transport (JobAccepted jid GenTracesJob)
+        pure [MirrorSendJobAccepted jid GenTracesJob]
+
+instance Transport t => Step (MkJobQuery t) where
+  exec (MkJobQuery transport store jid) = do
+    (phase, mOut) <- queryJob store jid
+    case mOut of
+      -- Terminal query answers with the retained result directly.
+      Just out -> do
+        sendMsg transport (JobResult jid out)
+        pure [MirrorSendJobResult jid (outcomeTag out)]
+      Nothing -> do
+        sendMsg transport (JobStatus jid phase)
+        pure [MirrorSendJobStatus jid phase]
+
+instance Transport t => Step (MkJobAwait t) where
+  exec (MkJobAwait transport store jid mTimeout) = do
+    r <- awaitJob store jid mTimeout
+    case r of
+      Right out -> do
+        sendMsg transport (JobResult jid out)
+        pure [MirrorSendJobResult jid (outcomeTag out)]
+      Left _ -> do
+        (phase, mOut) <- queryJob store jid
+        case mOut of
+          Just out -> do
+            sendMsg transport (JobResult jid out)
+            pure [MirrorSendJobResult jid (outcomeTag out)]
+          Nothing -> do
+            sendMsg transport (JobStatus jid phase)
+            pure [MirrorSendJobStatus jid phase]
+
+instance Transport t => Step (MkJobCancel t) where
+  exec (MkJobCancel transport store jid) = do
+    cancelJob store jid
+    (phase, _) <- queryJob store jid
+    sendMsg transport (JobStatus jid phase)
+    pure [MirrorSendJobStatus jid phase]
+
+-- | Async session entry point (design §5): a recv-dispatch loop over one
+-- connection. Async registers fork and return to the loop immediately; job
+-- operations are answered from the store (terminal query/await replies with
+-- 'JobResult', per the async contract); a /sync/ register received
+-- mid-session still runs to completion inline (blocking the loop, as
+-- today). Transport EOF or a decode failure ends the session: any reply on
+-- the way out is best-effort, the session's jobs are killed and their
+-- resources force-released ('closeJobStore'), and the accumulated step log
+-- is returned.
+runAsyncSession :: Transport t => t -> JobStore -> IO [MirrorStep]
+runAsyncSession transport store = loop []
+  where
+    loop acc = do
+      msg <- recvMsg transport
+      case msg of
+        Left err -> endSession acc (Just err)
+        Right incoming -> dispatch incoming acc
+    dispatch incoming acc = case incoming of
+      RegisterValidateAsync cfg bound mSpec -> do
+        steps <- exec (MkRunValidateAsync transport store cfg bound mSpec)
+        continue (MirrorRecvRegisterValidateAsync cfg bound mSpec : steps) acc
+      RegisterGenTracesAsync cfg tc destPath mSpec -> do
+        steps <- exec (MkRunGenTracesAsync transport store cfg tc destPath mSpec)
+        continue (MirrorRecvRegisterGenTracesAsync cfg tc destPath mSpec : steps) acc
+      QueryJob jid -> do
+        steps <- exec (MkJobQuery transport store jid)
+        continue (MirrorRecvJobQuery jid : steps) acc
+      AwaitJob jid mTimeout -> do
+        steps <- exec (MkJobAwait transport store jid mTimeout)
+        continue (MirrorRecvJobAwait jid : steps) acc
+      CancelJob jid -> do
+        steps <- exec (MkJobCancel transport store jid)
+        continue (MirrorRecvJobCancel jid : steps) acc
+      -- Sync one-shot registers still work mid-session, inline.
+      Register apCfg tc mSpec -> do
+        steps <- exec (MkRunMirror transport apCfg tc mSpec)
+        continue [MirrorRecvRegister apCfg tc mSpec] (steps ++ acc)
+      RegisterTraces apCfg traces -> do
+        steps <- exec (MkRunMirrorWithTraces transport apCfg traces)
+        continue [MirrorRecvRegisterTraces apCfg traces] (steps ++ acc)
+      RegisterGenTraces apCfg tc destPath mSpec -> do
+        steps <- exec (MkRunMirrorGenTraces transport apCfg tc destPath mSpec)
+        continue [MirrorRecvRegisterGenTraces apCfg tc destPath mSpec] (steps ++ acc)
+      RegisterValidate apCfg bound mSpec -> do
+        steps <- exec (MkRunValidate transport apCfg bound mSpec)
+        continue [MirrorRecvRegisterValidate apCfg bound mSpec] (steps ++ acc)
+      -- The interactive sync registers also run inline: each owns its
+      -- recv/send loop, blocks this session loop until done, and then
+      -- returns to it (same "sync register mid-session" rule, §5).
+      RegisterExplore spec invs exports maxSteps -> do
+        steps <- exec (MkExploreMirror transport spec invs exports maxSteps)
+        continue [MirrorRecvRegisterExplore spec invs exports maxSteps] (steps ++ acc)
+      RegisterExploreSession spec invs exports -> do
+        steps <- exec (MkExploreSession transport spec invs exports)
+        continue [MirrorRecvRegisterExploreSession spec invs exports] (steps ++ acc)
+      _ -> do
+        let err = T.pack "unexpected message in async session"
+        sendMsg transport (ProtocolError err)
+        continue [MirrorSendProtocolError err] acc
+    continue fresh acc = loop (reverse fresh ++ acc)
+    endSession acc mErr = do
+      case mErr of
+        Just err -> sendMsg transport (ProtocolError (T.pack err))
+        Nothing -> pure ()
+      closeJobStore store
+      pure (reverse acc)
+
 
 instance Transport t => Step (MkExploreMirror t) where
   exec (MkExploreMirror transport spec invs exports maxSteps) =
@@ -571,6 +761,18 @@ runMirrorExploreSession transport spec invs exports =
 
 runMirrorValidate :: Transport t => t -> ApalacheConfig -> Int -> Maybe ApalacheSpec -> IO [MirrorStep]
 runMirrorValidate transport cfg bound mSpec = exec (MkRunValidate transport cfg bound mSpec)
+
+-- | One-shot async validate submit (see 'runAsyncSession' for the full
+-- session loop). Signature mirrors 'runMirrorValidate' plus the job store.
+runMirrorValidateAsync :: Transport t => t -> JobStore -> ApalacheConfig -> Int -> Maybe ApalacheSpec -> IO [MirrorStep]
+runMirrorValidateAsync transport store cfg bound mSpec =
+  exec (MkRunValidateAsync transport store cfg bound mSpec)
+
+-- | One-shot async trace-gen submit; signature mirrors
+-- 'runMirrorGenTracesWithSpec' plus the job store.
+runMirrorGenTracesAsync :: Transport t => t -> JobStore -> ApalacheConfig -> TraceGenerationConfig -> Maybe FilePath -> Maybe ApalacheSpec -> IO [MirrorStep]
+runMirrorGenTracesAsync transport store cfg tc destPath mSpec =
+  exec (MkRunGenTracesAsync transport store cfg tc destPath mSpec)
 
 run :: Transport t => t -> IO [MirrorStep]
 run = exec . RecvMsg

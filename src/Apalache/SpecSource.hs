@@ -5,15 +5,26 @@ module Apalache.SpecSource
   , SpecRes (..)
   , Provenance (..)
   , acquireSpec
+  , acquireSpecIn
   , freshSessionDir
   , removeSessionDir
   , acquireSessionDir
+  , acquireSessionDirIn
   ) where
 
 import Apalache.Rpc.Types (ApalacheSpec (..))
 import Apalache.Types (ApalacheConfig (..))
 import Control.Exception (IOException, try)
-import Resource (Provenance (..), Resource, acquire)
+import Data.Functor.Identity (Identity (..))
+import Resource
+  ( Provenance (..)
+  , Registry
+  , Resource
+  , ResourceError
+  , acquire
+  , acquireIn
+  , resourceErrorText
+  )
 import Data.IORef (IORef, newIORef, atomicModifyIORef')
 import Data.List (nub)
 import Data.Text (Text)
@@ -100,23 +111,50 @@ data SpecRes = SpecRes
 -- When owned, the returned config's @specPath@ is overridden to the
 -- materialized root path. Existing callers of 'materializeSpec'/'removeSpecDir'
 -- are unaffected.
-acquireSpec :: Maybe ApalacheSpec -> ApalacheConfig -> IO (Either Text (Resource SpecRes, ApalacheConfig))
-acquireSpec Nothing cfg = do
-  let specRes = SpecRes Nothing (specPath cfg) Borrowed
-  res <- acquire (T.pack "spec (borrowed)") (pure specRes) (\_ -> pure ())
-  pure (Right (res, cfg))
-acquireSpec (Just spec) cfg = do
+
+-- | Shared worker behind 'acquireSpec' and 'acquireSpecIn': identical
+-- materialization and cleanup logic; only the acquire flavor (plain
+-- @acquire@ vs registry-registered @acquireIn@) differs, so the
+-- Owned/Borrowed cleanup invariants stay single-sourced.
+acquireSpecWith
+  :: (forall a. Text -> IO a -> (a -> IO ()) -> IO (f (Resource a)))
+  -> Maybe ApalacheSpec
+  -> ApalacheConfig
+  -> IO (Either Text (f (Resource SpecRes), ApalacheConfig))
+acquireSpecWith acq Nothing cfg = do
+  fres <- acq (T.pack "spec (borrowed)") (pure (SpecRes Nothing (specPath cfg) Borrowed)) (\_ -> pure ())
+  pure (Right (fres, cfg))
+acquireSpecWith acq (Just spec) cfg = do
   r <- materializeSpec spec
   case r of
     Left err -> pure (Left err)
     Right (dir, rootPath) -> do
-      let specRes = SpecRes (Just dir) rootPath Owned
-      res <- acquire (T.pack "spec (owned)") (pure specRes) removeSpecDirWhenOwned
-      pure (Right (res, cfg { specPath = rootPath }))
+      fres <- acq (T.pack "spec (owned)") (pure (SpecRes (Just dir) rootPath Owned)) removeSpecDirWhenOwned
+      pure (Right (fres, cfg { specPath = rootPath }))
   where
     removeSpecDirWhenOwned sr = case specResDir sr of
       Just d  -> removeSpecDir d
       Nothing -> pure ()
+
+-- | Plain (unregistered) spec acquisition; see 'acquireSpecWith' for the
+-- shared semantics.
+acquireSpec :: Maybe ApalacheSpec -> ApalacheConfig -> IO (Either Text (Resource SpecRes, ApalacheConfig))
+acquireSpec mSpec cfg = do
+  r <- acquireSpecWith (\l g c -> Identity <$> acquire l g c) mSpec cfg
+  pure (fmap (\(Identity res, c) -> (res, c)) r)
+
+-- | Registry-registered form of 'acquireSpec' for the async job model: the
+-- acquired spec resource is registered in the given 'Registry' atomically
+-- with acquisition, so session close ('Resource.forceReleaseAll') reclaims
+-- any spec dir a job still holds. Registry failures are surfaced through the
+-- @Text@ error channel (the caller turns them into a register error).
+acquireSpecIn :: Registry -> Maybe ApalacheSpec -> ApalacheConfig -> IO (Either Text (Resource SpecRes, ApalacheConfig))
+acquireSpecIn reg mSpec cfg = do
+  r <- acquireSpecWith (acquireIn reg) mSpec cfg
+  pure $ case r of
+    Left err             -> Left err
+    Right (Left rerr, _) -> Left (resourceErrorText rerr)
+    Right (Right res, c) -> Right (res, c)
 
 -- | Create a fresh per-session temporary directory (the session dir apalache
 -- uses as its run dir / cwd). Removed via 'removeSessionDir'.
@@ -133,3 +171,9 @@ removeSessionDir = removeDirectoryRecursive
 -- (total). The dynamic-lifetime form of 'withSessionDir's bracket.
 acquireSessionDir :: IO (Resource FilePath)
 acquireSessionDir = acquire (T.pack "session-dir") freshSessionDir removeSessionDir
+
+-- | Registry-registered form of 'acquireSessionDir' for the async job model
+-- (see 'acquireSpecIn'); returns 'Resource.ResourceError' directly since
+-- acquisition here cannot fail for spec reasons.
+acquireSessionDirIn :: Registry -> IO (Either ResourceError (Resource FilePath))
+acquireSessionDirIn reg = acquireIn reg (T.pack "session-dir") freshSessionDir removeSessionDir

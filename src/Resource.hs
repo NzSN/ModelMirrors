@@ -23,6 +23,7 @@ module Resource
   , Registry
   , newRegistry
   , forceReleaseAll
+  , resourceErrorText
   ) where
 
 import Control.Exception (SomeException, bracket, displayException, mask, try)
@@ -197,6 +198,14 @@ register :: Registry -> Resource a -> IO Bool
 register (Registry ref) res =
   atomicModifyIORef' ref $ \(open, entries) ->
     if open then ((open, RegEntry res : entries), True) else ((open, entries), False)
+
+-- | Render a 'ResourceError' as human-readable text (used by callers that
+-- surface registry failures through a @Text@ error channel, e.g. the async
+-- job store mapping 'RegistryClosed' to a register error).
+resourceErrorText :: ResourceError -> Text
+resourceErrorText = \case
+  UseAfterRelease l -> T.pack "resource use after release: " <> l
+  RegistryClosed    -> T.pack "resource registry closed"
 
 -- | Minimal stderr logging (the codebase has no structured-logger module yet;
 -- existing modules log to stderr directly). One line per event.

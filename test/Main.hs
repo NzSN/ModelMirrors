@@ -14,6 +14,7 @@ import qualified MinimalTraceCheckSpec
 import qualified MirrorE2ESpec
 import qualified MirrorProtocolSpec
 import qualified MirrorStepSpec
+import qualified Protocol.AsyncJobsSpec
 import qualified TcpTransportSpec
 import qualified TlsTransportSpec
 import qualified RegistrySpec
@@ -31,6 +32,7 @@ main = defaultMain $ testGroup "ModelMirrors"
   , MainSpec.spec
   , MirrorProtocolSpec.spec
   , MirrorStepSpec.spec
+  , Protocol.AsyncJobsSpec.spec
   , MinimalTraceCheckSpec.spec
   , MirrorE2ESpec.spec
   , ServerBehaviorSpec.spec

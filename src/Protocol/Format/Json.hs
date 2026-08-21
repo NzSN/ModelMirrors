@@ -6,6 +6,7 @@ module Protocol.Format.Json
 
 import Protocol.Core
 
+import Control.Applicative ((<|>))
 import Data.Aeson
 import Data.Aeson.Key (fromString)
 import Data.Aeson.Types (Parser)
@@ -48,6 +49,29 @@ instance ToJSON ClientMessage where
     , fromString "apalacheConfig" .= cfg
     , fromString "bound"          .= bound
     ] ++ maybe [] (\s -> [fromString "spec" .= s]) mSpec
+  toJSON (RegisterValidateAsync cfg bound mSpec) = object $
+    [ fromString "proto_step"     .= T.pack "register_validate_async"
+    , fromString "apalacheConfig" .= cfg
+    , fromString "bound"          .= bound
+    ] ++ maybe [] (\s -> [fromString "spec" .= s]) mSpec
+  toJSON (RegisterGenTracesAsync cfg tc dest mSpec) = object $
+    [ fromString "proto_step"     .= T.pack "register_trace_gen_async"
+    , fromString "apalacheConfig" .= cfg
+    , fromString "traceConfig"    .= tc
+    ] ++ maybe [] (\d -> [fromString "destPath" .= d]) dest
+      ++ maybe [] (\s -> [fromString "spec" .= s]) mSpec
+  toJSON (QueryJob jobId) = object
+    [ fromString "proto_step" .= T.pack "query_job"
+    , fromString "jobId" .= jobId
+    ]
+  toJSON (AwaitJob jobId mTimeout) = object $
+    [ fromString "proto_step" .= T.pack "await_job"
+    , fromString "jobId" .= jobId
+    ] ++ maybe [] (\n -> [fromString "timeoutSecs" .= n]) mTimeout
+  toJSON (CancelJob jobId) = object
+    [ fromString "proto_step" .= T.pack "cancel_job"
+    , fromString "jobId" .= jobId
+    ]
   toJSON (ExploreAssumeTransition tid) = object
     [ fromString "proto_step" .= T.pack "explore_assume_transition"
     , fromString "transitionId" .= tid
@@ -105,6 +129,21 @@ instance FromJSON ClientMessage where
           RegisterValidate <$> o .: fromString "apalacheConfig"
                            <*> o .: fromString "bound"
                            <*> o .:? fromString "spec"
+      t | t == T.pack "register_validate_async" ->
+           RegisterValidateAsync <$> o .: fromString "apalacheConfig"
+                                 <*> o .: fromString "bound"
+                                 <*> o .:? fromString "spec"
+      t | t == T.pack "register_trace_gen_async" ->
+           RegisterGenTracesAsync <$> o .: fromString "apalacheConfig"
+                                  <*> o .: fromString "traceConfig"
+                                  <*> o .:? fromString "destPath" .!= Nothing
+                                  <*> o .:? fromString "spec"
+      t | t == T.pack "query_job" ->
+           QueryJob <$> o .: fromString "jobId"
+      t | t == T.pack "await_job" ->
+           AwaitJob <$> o .: fromString "jobId" <*> o .:? fromString "timeoutSecs"
+      t | t == T.pack "cancel_job" ->
+           CancelJob <$> o .: fromString "jobId"
       t | t == T.pack "explore_assume_transition" ->
           ExploreAssumeTransition <$> o .: fromString "transitionId"
       t | t == T.pack "explore_next_step" ->
@@ -197,6 +236,21 @@ instance ToJSON MirrorMessage where
   toJSON ExploreSessionDone = object
     [ fromString "proto_step" .= T.pack "explore_session_done"
     ]
+  toJSON (JobAccepted jobId kind) = object
+    [ fromString "proto_step" .= T.pack "job_accepted"
+    , fromString "jobId" .= jobId
+    , fromString "kind" .= kind
+    ]
+  toJSON (JobStatus jobId phase) = object
+    [ fromString "proto_step" .= T.pack "job_status"
+    , fromString "jobId" .= jobId
+    , fromString "phase" .= phase
+    ]
+  toJSON (JobResult jobId outcome) = object
+    [ fromString "proto_step" .= T.pack "job_result"
+    , fromString "jobId" .= jobId
+    , fromString "outcome" .= outcome
+    ]
 
 instance FromJSON MirrorMessage where
   parseJSON = withObject "MirrorMessage" $ \o -> do
@@ -240,8 +294,72 @@ instance FromJSON MirrorMessage where
           ExploreRollbackDone <$> o .: fromString "snapshotId"
       t | t == T.pack "explore_session_done" ->
           pure ExploreSessionDone
+      t | t == T.pack "job_accepted" ->
+          JobAccepted <$> o .: fromString "jobId" <*> o .: fromString "kind"
+      t | t == T.pack "job_status" ->
+          JobStatus <$> o .: fromString "jobId" <*> o .: fromString "phase"
+      t | t == T.pack "job_result" ->
+          JobResult <$> o .: fromString "jobId" <*> o .: fromString "outcome"
       _ ->
           fail $ "Unknown MirrorMessage tag: " ++ T.unpack tag
+
+instance ToJSON JobId where
+  toJSON (JobId t) = toJSON t
+
+instance FromJSON JobId where
+  parseJSON v = JobId <$> parseJSON v
+
+instance ToJSON JobKind where
+  toJSON ValidateJob  = toJSON (T.pack "validate")
+  toJSON GenTracesJob = toJSON (T.pack "gen_traces")
+
+instance FromJSON JobKind where
+  parseJSON v = do
+    t <- parseJSON v
+    if t == T.pack "validate" then pure ValidateJob
+    else if t == T.pack "gen_traces" then pure GenTracesJob
+    else fail $ "Unknown JobKind: " ++ T.unpack (t :: T.Text)
+
+instance ToJSON JobPhase where
+  toJSON JobPending   = toJSON (T.pack "pending")
+  toJSON JobRunning   = toJSON (T.pack "running")
+  toJSON JobDone      = toJSON (T.pack "done")
+  toJSON JobFailed    = toJSON (T.pack "failed")
+  toJSON JobCancelled = toJSON (T.pack "cancelled")
+  toJSON JobUnknown   = toJSON (T.pack "unknown")
+
+instance FromJSON JobPhase where
+  parseJSON v = do
+    t <- parseJSON v
+    case (t :: T.Text) of
+      x | x == T.pack "pending"   -> pure JobPending
+        | x == T.pack "running"   -> pure JobRunning
+        | x == T.pack "done"      -> pure JobDone
+        | x == T.pack "failed"    -> pure JobFailed
+        | x == T.pack "cancelled" -> pure JobCancelled
+        | x == T.pack "unknown"   -> pure JobUnknown
+        | otherwise -> fail $ "Unknown JobPhase: " ++ T.unpack x
+
+instance ToJSON JobOutcome where
+  toJSON (JobValidateDone result) = object
+    [ fromString "validate" .= result ]
+  toJSON (JobGenTracesDone paths traces) = object
+    [ fromString "genTraces" .= object
+        [ fromString "itfTracePaths" .= paths
+        , fromString "itfTraces" .= traces
+        ]
+    ]
+  toJSON (JobInfraError err) = object
+    [ fromString "error" .= err ]
+
+instance FromJSON JobOutcome where
+  parseJSON = withObject "JobOutcome" $ \o ->
+        (JobValidateDone <$> o .: fromString "validate")
+    <|> (do g <- o .: fromString "genTraces"
+            withObject "JobOutcome.genTraces" (\go ->
+              JobGenTracesDone <$> go .: fromString "itfTracePaths"
+                               <*> go .:? fromString "itfTraces" .!= []) g)
+    <|> (JobInfraError <$> o .: fromString "error")
 
 instance ToJSON PathSeg where
   toJSON (Field f) = object [ fromString "field" .= f ]
