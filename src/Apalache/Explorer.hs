@@ -3,6 +3,8 @@ module Apalache.Explorer
   , startApalacheServer
   , stopApalacheServer
   , withApalacheServer
+  , acquireApalacheServer
+  , acquireExplorer
   , newExplorer
   , exploreInit
   , exploreNext
@@ -20,13 +22,15 @@ import Apalache.Rpc.Client
 import Apalache.Rpc.Types
 import Apalache.Types (ItfTrace, Value)
 import Control.Concurrent (threadDelay)
-import Control.Exception (finally)
+import Control.Exception (throwIO)
+import Control.Monad (void)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64 as B64 (encode)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import Resource (Resource, acquire, use, with)
 import Network.Socket
   ( AddrInfo (..)
   , AddrInfoFlag (..)
@@ -96,10 +100,41 @@ stopApalacheServer server = do
   _ <- waitForProcess (serverProcess server)
   pure ()
 
-withApalacheServer :: Maybe Int -> (ApalacheServer -> IO a) -> IO a
-withApalacheServer mPort action = do
+-- | Acquire an apalache explorer server as a 'Resource'. Cleanup is
+-- 'stopApalacheServer' (terminate + wait) — exactly the bracket cleanup used
+-- by 'withApalacheServer'.
+acquireApalacheServer :: Maybe Int -> IO (Resource ApalacheServer)
+acquireApalacheServer mPort = do
   server <- startApalacheServer mPort
-  action server `finally` stopApalacheServer server
+  acquire (T.pack "apalache-server") (pure server) stopApalacheServer
+
+-- | Run an action with a started apalache explorer server, guaranteeing the
+-- server is stopped on exit (normal or exceptional). Re-based on
+-- 'Resource.with'; signature and observable behavior are unchanged.
+withApalacheServer :: Maybe Int -> (ApalacheServer -> IO a) -> IO a
+withApalacheServer mPort action =
+  with (T.pack "apalache-server") (startApalacheServer mPort) stopApalacheServer $
+    \serverRes ->
+      either (\e -> throwIO (userError ("apalache-server unavailable: " ++ show e))) pure
+        =<< use serverRes action
+
+-- | Acquire an 'Explorer' session on a running server as a 'Resource'.
+-- Cleanup is 'exploreDispose' (best-effort: RPC/IO errors are swallowed, so
+-- release is total and never throws). Wraps 'newExplorer'; both keep working
+-- unchanged.
+acquireExplorer
+  :: ApalacheServer
+  -> ApalacheSpec
+  -> [Text]
+  -> [Text]
+  -> IO (Either RpcError (Resource Explorer))
+acquireExplorer server spec invs exports = do
+  r <- newExplorer server spec invs exports
+  case r of
+    Left err -> pure (Left err)
+    Right expl -> do
+      res <- acquire (T.pack "explorer") (pure expl) (\e -> void (exploreDispose e))
+      pure (Right res)
 
 waitForServer :: RpcClient -> Int -> IO ()
 waitForServer client maxRetries = go maxRetries

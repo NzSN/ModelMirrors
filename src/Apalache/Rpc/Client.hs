@@ -12,6 +12,7 @@ module Apalache.Rpc.Client
   , assumeState
   ) where
 
+import Apalache.HttpManager (sharedManager)
 import Apalache.Rpc.Types
 import Control.Exception (catch)
 import Data.Aeson (FromJSON, ToJSON, encode, eitherDecode, toJSON)
@@ -21,9 +22,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.ByteString.Char8 as BSC
 import Network.HTTP.Client
-  ( newManager
-  , defaultManagerSettings
-  , httpLbs
+  ( httpLbs
   , parseRequest
   , RequestBody (..)
   , Request (..)
@@ -37,11 +36,10 @@ import Network.HTTP.Types.Header (hContentType)
 
 newRpcClient :: Int -> IO RpcClient
 newRpcClient port = do
-  manager <- newManager defaultManagerSettings
   ref <- newIORef 1
   pure $ RpcClient
     { rpcBaseUrl = T.pack $ "http://localhost:" ++ show port ++ "/rpc"
-    , rpcManager = manager
+    , rpcManager = sharedManager
     , rpcNextId  = ref
     }
 

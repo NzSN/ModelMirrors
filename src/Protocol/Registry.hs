@@ -7,6 +7,7 @@ module Protocol.Registry
   , discoverServices
   ) where
 
+import Apalache.HttpManager (sharedManager)
 import Control.Concurrent (threadDelay)
 import Control.Exception (SomeException, try)
 import Control.Monad (forever, void)
@@ -21,9 +22,7 @@ import Data.Text qualified as T
 import Network.HTTP.Client
   ( Request (..)
   , RequestBody (..)
-  , defaultManagerSettings
   , httpLbs
-  , newManager
   , parseRequest
   , responseBody
   , responseStatus
@@ -49,7 +48,7 @@ serviceName = "modelmirrors"
 registerService :: RegistryUrl -> ServiceInfo -> IO Bool
 registerService (RegistryUrl url) info = do
   result <- try $ do
-    manager <- newManager defaultManagerSettings
+    let manager = sharedManager
     req <- parseRequest (url ++ "/v1/agent/service/register")
     let body = A.object
           [ fromString "ID" A..= siServiceId info
@@ -73,7 +72,7 @@ registerService (RegistryUrl url) info = do
 -- a lapsed TTL simply removes the service from discovery.
 heartbeatLoop :: RegistryUrl -> Text -> IO ()
 heartbeatLoop (RegistryUrl url) sid = do
-  manager <- newManager defaultManagerSettings
+  let manager = sharedManager
   forever $ do
     _ <- try (do
       req <- parseRequest (url ++ "/v1/agent/check/pass/service:" ++ T.unpack sid)
@@ -85,7 +84,7 @@ deregisterService :: RegistryUrl -> Text -> IO ()
 deregisterService (RegistryUrl url) sid = void (try go :: IO (Either SomeException ()))
   where
     go = do
-      manager <- newManager defaultManagerSettings
+      let manager = sharedManager
       req <- parseRequest (url ++ "/v1/agent/service/deregister/" ++ T.unpack sid)
       void (httpLbs req { method = B8.pack "PUT" } manager)
 
@@ -94,7 +93,7 @@ deregisterService (RegistryUrl url) sid = void (try go :: IO (Either SomeExcepti
 discoverServices :: RegistryUrl -> IO [ServiceInfo]
 discoverServices (RegistryUrl url) = do
   result <- try $ do
-    manager <- newManager defaultManagerSettings
+    let manager = sharedManager
     req <- parseRequest (url ++ "/v1/health/service/" ++ serviceName ++ "?passing=true")
     resp <- httpLbs req manager
     pure (A.decode (responseBody resp) :: Maybe [A.Value])

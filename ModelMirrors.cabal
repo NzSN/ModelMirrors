@@ -69,10 +69,12 @@ library
         Apalache.Command,
         Apalache.Trace,
         Apalache.Explorer,
+        Apalache.HttpManager,
         Apalache.Rpc.Types,
         Apalache.Rpc.Client,
         Apalache.Rpc.ServerBehavior,
         Apalache.SpecSource,
+        Resource,
         Engine,
         Engine.Core,
         Engine.Replay,
@@ -190,7 +192,8 @@ test-suite ModelMirrors-test
         MirrorStepSpec,
         TcpTransportSpec,
         TlsTransportSpec,
-        RegistrySpec
+        RegistrySpec,
+        ResourceSpec
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

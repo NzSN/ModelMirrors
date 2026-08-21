@@ -17,6 +17,7 @@ import qualified MirrorStepSpec
 import qualified TcpTransportSpec
 import qualified TlsTransportSpec
 import qualified RegistrySpec
+import qualified ResourceSpec
 import Test.Tasty (defaultMain, testGroup)
 
 main :: IO ()
@@ -38,4 +39,5 @@ main = defaultMain $ testGroup "ModelMirrors"
   , TcpTransportSpec.spec
   , TlsTransportSpec.spec
   , RegistrySpec.spec
+  , ResourceSpec.spec
   ]

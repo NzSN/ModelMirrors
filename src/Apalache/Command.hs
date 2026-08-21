@@ -6,6 +6,8 @@ module Apalache.Command
   , generateTraceFiles
   , generateTraceFilesIn
   , apalacheBin
+  , ApalacheResult (..)
+  , spawnApalache
   ) where
 
 import Apalache.Types
@@ -18,11 +20,27 @@ import Apalache.Types
   )
 import Apalache.Trace (findTraceFiles, findTraces)
 
+import Control.Concurrent (forkIO)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (SomeException, evaluate, try)
 import qualified Data.Text as T
+import Resource (Resource, acquire)
 import System.Directory (makeAbsolute)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
-import System.Process (cwd, proc, readCreateProcessWithExitCode, readProcessWithExitCode)
+import System.IO (Handle, hClose, hGetContents)
+import System.Process
+  ( CreateProcess (..)
+  , ProcessHandle
+  , StdStream (..)
+  , createProcess
+  , cwd
+  , proc
+  , readCreateProcessWithExitCode
+  , readProcessWithExitCode
+  , terminateProcess
+  , waitForProcess
+  )
 
 -- Launches @apalache-mc@: honor the @APALACHE_MC@ override if set, otherwise
 -- rely on it being on @PATH@. There is no Bazel runfiles fallback; this is a
@@ -191,3 +209,62 @@ optionalArg :: String -> Maybe T.Text -> [String]
 optionalArg prefix = \case
   Nothing -> []
   Just v  -> [prefix ++ T.unpack v]
+
+-- | The full outcome of a single apalache invocation.
+data ApalacheResult = ApalacheResult
+  { arExitCode :: !ExitCode
+  , arStdOut   :: !String
+  , arStdErr   :: !String
+  } deriving (Show, Eq)
+
+-- | Run one apalache invocation (the binary resolved by 'apalacheBin') and
+-- return its full outcome alongside a 'Resource ProcessHandle'. The handle's
+-- cleanup is idempotent 'terminateProcess'+'waitForProcess': terminating an
+-- already-exited child is a no-op and 'waitForProcess' returns the recorded
+-- exit code immediately, so releasing after completion (or dropping the
+-- handle) is safe. This is the wrapper the async job model will use to close
+-- the cancellation kill-window; the existing 'validateSpecIn'/'generateTracesIn'/
+-- 'generateTraceFilesIn' helpers are unchanged.
+spawnApalache :: [String] -> IO (ApalacheResult, Resource ProcessHandle)
+spawnApalache args = do
+  bin <- apalacheBin
+  (_, mOut, mErr, ph) <-
+    createProcess (proc bin args)
+      { std_in = NoStream, std_out = CreatePipe, std_err = CreatePipe }
+  case (mOut, mErr) of
+    (Just hOut, Just hErr) -> do
+      res <- acquire (T.pack "apalache-process") (pure ph) stopApalacheProcess
+      (out, err) <- drainOutputs hOut hErr
+      hClose hOut
+      hClose hErr
+      exitCode <- waitForProcess ph
+      pure (ApalacheResult exitCode out err, res)
+    _ -> do
+      -- Unreachable (we asked for CreatePipe), but be defensive so the
+      -- launched process is never left running.
+      _ <- try (terminateProcess ph) :: IO (Either SomeException ())
+      _ <- try (waitForProcess ph) :: IO (Either SomeException ExitCode)
+      ioError (userError "spawnApalache: expected stdout/stderr pipes from createProcess")
+
+-- | Idempotent process stop: 'terminateProcess' then 'waitForProcess', each
+-- guarded so cleanup never throws even when the process already exited.
+stopApalacheProcess :: ProcessHandle -> IO ()
+stopApalacheProcess ph = do
+  _ <- try (terminateProcess ph) :: IO (Either SomeException ())
+  _ <- try (waitForProcess ph) :: IO (Either SomeException ExitCode)
+  pure ()
+
+-- | Drain a process's stdout and stderr concurrently (as
+-- 'readCreateProcessWithExitCode' does internally) so a chatty apalache
+-- cannot deadlock the reader on a full pipe buffer.
+drainOutputs :: Handle -> Handle -> IO (String, String)
+drainOutputs hOut hErr = do
+  outVar <- newEmptyMVar
+  errVar <- newEmptyMVar
+  _ <- forkIO (readAll hOut >>= putMVar outVar)
+  _ <- forkIO (readAll hErr >>= putMVar errVar)
+  (,) <$> takeMVar outVar <*> takeMVar errVar
+  where
+    readAll h = do
+      s <- try (hGetContents h >>= \t -> evaluate (length t) >> pure t)
+      pure (either (const "") id (s :: Either SomeException String))

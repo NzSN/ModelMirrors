@@ -38,7 +38,7 @@ import Apalache.Explorer
   , withApalacheServer
   )
 import Apalache.Rpc.Client (assumeTransition, nextStep, rollback)
-import Apalache.SpecSource (materializeSpec, removeSpecDir)
+import Apalache.SpecSource (acquireSpec, freshSessionDir, removeSessionDir)
 import Apalache.Rpc.Types
   ( ApalacheSpec
   , AssumeTransitionParams (..)
@@ -63,7 +63,7 @@ import Apalache.Types
     , Value (..)
     , applyParamVars
     )
-import Control.Exception (bracket, try, IOException)
+import Control.Exception (IOException, finally, throwIO, try)
 import Control.Monad (forM_)
 import qualified Data.Aeson as A
 import qualified Data.ByteString.Lazy as LBS
@@ -79,8 +79,8 @@ import qualified Engine.Types as Engine
 import Protocol.Core (ClientMessage (..), MirrorMessage (..))
 import Protocol.Format.Json ()
 import Protocol.Transport.Core (Transport, recvMsg, sendMsg)
+import Resource (release, use, with)
 import System.Directory (createDirectoryIfMissing, copyFile, doesDirectoryExist)
-import System.IO.Temp (withSystemTempDirectory)
 import System.FilePath (takeFileName, (</>))
 
 data MirrorStep
@@ -182,25 +182,31 @@ instance Transport t => Step (RecvMsg t) where
         sendMsg transport (ProtocolError (T.pack err))
         pure [MirrorSendProtocolError (T.pack err)]
 
--- | When inline spec sources are provided, materialize them to a temp dir
+-- | When inline spec sources are provided, acquire them via 'acquireSpec'
 -- (the apalache CLI resolves EXTENDS from the filesystem) and override the
--- config's specPath; otherwise use the config as-is.
+-- config's specPath; otherwise use the config as-is. The acquired spec
+-- resource is released on exit (normal or exceptional), matching the old
+-- bracket behavior; release is a no-op for 'Borrowed' specs.
 withSpecDir :: Transport t => t -> Maybe ApalacheSpec -> ApalacheConfig -> (ApalacheConfig -> IO [MirrorStep]) -> IO [MirrorStep]
 withSpecDir _ Nothing cfg k = k cfg
 withSpecDir transport (Just spec) cfg k = do
-  r <- materializeSpec spec
+  r <- acquireSpec (Just spec) cfg
   case r of
     Left err -> do
       sendMsg transport (RegisterError err)
       pure [MirrorSendRegisterError err]
-    Right (dir, rootPath) ->
-      bracket (pure dir) removeSpecDir
-        (\_ -> k cfg { specPath = rootPath })
+    Right (specResource, cfg') -> do
+      result <- k cfg' `finally` release specResource
+      pure result
 
 -- | Run an action with a per-session temporary directory (removed on
 -- exit) so concurrent sessions never share apalache run directories.
+-- Re-based on 'Resource.with' over 'freshSessionDir'/'removeSessionDir'.
 withSessionDir :: (FilePath -> IO a) -> IO a
-withSessionDir = withSystemTempDirectory "modelmirrors-session-"
+withSessionDir action =
+  with (T.pack "session-dir") freshSessionDir removeSessionDir $ \sessionRes ->
+    either (\e -> throwIO (userError ("session-dir unavailable: " ++ show e))) pure
+      =<< use sessionRes action
 
 instance Transport t => Step (MkRunMirror t) where
   exec (MkRunMirror transport cfg tc mSpec) =
