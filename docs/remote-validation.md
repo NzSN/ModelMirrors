@@ -1,5 +1,10 @@
 # Implementation: Remote Validation (Validate-Only Path)
 
+This page describes the Haskell CLI: it reads the entry file and explicit `--dep`
+files. The Lean CLI separately adds recursive source resolution and `--async`;
+see its [remote server guide](../../Mirrors/Docs/remote-server-guide.md). Haskell
+async library APIs do not imply that this CLI accepts the same flags.
+
 > **Status: implemented** (plus post-review amendments: typecheck
 > isolation, `traceArgs` `--inv` gating, server-side bound cap, MBT
 > coverage). This document is kept as the as-built record; where it and

@@ -1,5 +1,11 @@
 # ModelMirrors
 
+This is the Haskell reference implementation. The Lean checker, compiler and
+current application onboarding are in [Mirrors](../Mirrors/README.md); the
+[framework map](../Mirrors/Docs/framework-map.md) explains the repository roles.
+An executable named ModelMirrors may be either implementation, so identify its
+source revision and binary hash before assuming feature or deployment parity.
+
 Verify that your implementation follows the rules defined by a TLA+ model —
 through trace replay or interactive symbolic model checking — over a
 language-agnostic JSON-lines IPC protocol.
