@@ -10,9 +10,8 @@ module Protocol.Transport.Tcp
   ) where
 
 import Control.Concurrent (forkIO, newQSem, signalQSem, waitQSem)
-import Control.Exception (IOException, SomeException, bracket, try)
+import Control.Exception (SomeException, bracket, finally, try)
 import Control.Monad (forever)
-import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as B8
 import Network.Socket
   ( AddrInfo (..)
@@ -36,19 +35,24 @@ import Network.Socket
   )
 import Protocol.Mirror (run)
 import Protocol.Transport.Core (Transport (..))
+import Protocol.Transport.Framing (readHandleFrame, validatePayload)
 import System.IO
   ( Handle
   , IOMode (..)
   , hClose
   , hFlush
   , hPrint
+  , hSetBinaryMode
   , stderr
   )
 
 newtype TcpTransport = TcpTransport Handle
 
 tcpTransport :: Socket -> IO TcpTransport
-tcpTransport sock = TcpTransport <$> socketToHandle sock ReadWriteMode
+tcpTransport sock = do
+  h <- socketToHandle sock ReadWriteMode
+  hSetBinaryMode h True
+  pure (TcpTransport h)
 
 -- | Close the underlying handle. Note: 'close' on the original
 -- 'Socket' is a no-op after 'tcpTransport' (socketToHandle takes
@@ -81,10 +85,11 @@ connectTcp host port = withSocketsDo $ do
       tcpTransport s
 
 instance Transport TcpTransport where
-  send (TcpTransport h) bs = B8.hPutStrLn h bs >> hFlush h
-  recv (TcpTransport h) = do
-    r <- try (B8.hGetLine h) :: IO (Either IOException BS.ByteString)
-    pure (either (const B8.empty) id r)
+  send (TcpTransport h) bs = do
+    validatePayload bs
+    B8.hPutStrLn h bs
+    hFlush h
+  recv (TcpTransport h) = readHandleFrame h (hClose h)
 
 -- | Listen on the given port and serve one protocol session per connection,
 -- sequentially. A client that drops mid-session logs to stderr and the
@@ -105,11 +110,10 @@ serveTcpOn host0 port = do
       _  -> bracket (openListener (pickListenerAddr addrs)) close $ \lsock -> forever $ do
         (conn, _) <- accept lsock
         t <- tcpTransport conn
-        r <- try (run t)
+        r <- try (run t `finally` tcpClose t)
         case r of
           Left (e :: SomeException) -> hPrint stderr e
           Right _ -> pure ()
-        close conn
     where
       openListener addr = do
         s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
@@ -134,12 +138,11 @@ serveTcpConcurrent jobs port = withSocketsDo $ do
       _ <- forkIO $ do
         r <- try $ do
           t <- tcpTransport conn
-          _ <- run t
+          _ <- run t `finally` tcpClose t
           pure ()
         case r of
           Left (e :: SomeException) -> hPrint stderr e
           Right _ -> pure ()
-        close conn
         signalQSem sem
       pure ()
   where

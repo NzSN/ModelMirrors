@@ -15,7 +15,7 @@ module Protocol.Transport.Tls
   ) where
 
 import Control.Concurrent (forkIO, newQSem, signalQSem, threadDelay, waitQSem)
-import Control.Exception (SomeException, bracket, bracketOnError, catch, try)
+import Control.Exception (SomeException, bracket, bracketOnError, catch, finally, try)
 import Control.Monad (forever, unless, when)
 import System.Environment (lookupEnv)
 import System.IO.Unsafe (unsafePerformIO)
@@ -24,11 +24,9 @@ import Data.Bits ((.&.))
 #endif
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as B8
-#ifdef mingw32_HOST_OS
 import Data.Word (Word8)
-#endif
+import Data.IP (IPv4, IPv6, toIPv4, toIPv6)
 import Data.ByteString.Lazy qualified as LBS
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Hourglass (Elapsed (..), Seconds (..), timeConvert)
 import Time.System (timeCurrent)
 import Network.Socket
@@ -66,6 +64,7 @@ import Network.TLS
   , Supported (..)
   , Version (..)
   , contextNew
+  , contextClose
   , credentialLoadX509
   , defaultParamsClient
   , defaultParamsServer
@@ -79,6 +78,7 @@ import Network.TLS
   )
 import Data.X509
   ( Certificate
+  , HashALG (HashSHA256)
   , SignedCertificate
   , certExtensions
   , certIssuerDN
@@ -93,13 +93,25 @@ import Data.X509
   )
 import Data.X509.CertificateStore (CertificateStore, listCertificates, readCertificateStore)
 import Data.X509.File (readSignedObject)
-import Data.X509.Validation (SignatureVerification (..), verifySignedSignature)
+import Data.X509.Validation
+  ( FailedReason (..)
+  , ServiceID
+  , SignatureVerification (..)
+  , ValidationCache
+  , ValidationHooks (..)
+  , defaultChecks
+  , defaultHooks
+  , validate
+  , verifySignedSignature
+  )
 import Crypto.Hash (SHA256 (..), hashWith)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Protocol.Mirror (run)
 import Protocol.Transport.Core (Transport (..))
+import Protocol.Transport.Framing (FrameReader, newFrameReader, readFrame, validatePayload)
 import Protocol.Transport.Tcp (pickListenerAddr)
+import Text.Read (readMaybe)
 import System.IO (hFlush, hPrint, hPutStrLn, stderr)
 #ifdef mingw32_HOST_OS
 import System.IO (BufferMode (NoBuffering), Handle, IOMode (..), hClose, hSetBuffering)
@@ -108,46 +120,35 @@ import System.IO (BufferMode (NoBuffering), Handle, IOMode (..), hClose, hSetBuf
 import System.Posix.Files (fileMode, getFileStatus)
 #endif
 
-data TlsTransport = TlsTransport Context (IORef BS.ByteString)
+data TlsTransport = TlsTransport Context FrameReader
 
 tlsTransport :: Context -> IO TlsTransport
-tlsTransport ctx = TlsTransport ctx <$> newIORef BS.empty
+tlsTransport ctx = TlsTransport ctx <$> newFrameReader (recvData ctx) (contextClose ctx)
 
 -- | Best-effort graceful close: send @close_notify@, ignoring the error if the
--- peer has already dropped the connection. The underlying socket is released
--- by the process on exit.
+-- peer has already dropped the connection, then release the owned backend.
 tlsClose :: TlsTransport -> IO ()
-tlsClose (TlsTransport ctx _) = bye ctx `catch` \(_ :: SomeException) -> pure ()
+tlsClose (TlsTransport ctx _) =
+  (bye ctx `finally` contextClose ctx) `catch` \(_ :: SomeException) -> pure ()
 
 instance Transport TlsTransport where
   send (TlsTransport ctx _) bs = do
+    validatePayload bs
     when tlsRxDebug (dbgLn ("TXPLAIN " ++ show (BS.length bs) ++ " " ++ B8.unpack (B8.take 90 bs)))
     sendData ctx (LBS.fromStrict (B8.snoc bs '\n'))
-  recv t@(TlsTransport ctx ref) = do
-    buf <- readIORef ref
-    case B8.elemIndex '\n' buf of
-      Just i -> do
-        let line = BS.take i buf
-        when tlsRxDebug (dbgLn ("RXPLAIN " ++ show (BS.length line) ++ " " ++ B8.unpack (B8.take 90 line)))
-        writeIORef ref (BS.drop (i + 1) buf)
-        pure line
-      Nothing -> do
-        chunk <- recvData ctx
-        if BS.null chunk
-          then pure B8.empty
-          else writeIORef ref (buf <> chunk) >> recv t
+  recv (TlsTransport _ reader) = readFrame reader
 
 -- | Build TLS 1.3-only server parameters with mutual authentication.
 -- Fails (via 'ioError') if the credential files cannot be loaded, the CA
--- file contains no certificates, or the private key file is readable by
--- group or other users.
+-- file contains no certificates, or the POSIX private key mode is not exactly
+-- 0600 (including executable and special permission bits).
 mkServerParams :: FilePath -> FilePath -> FilePath -> IO ServerParams
 mkServerParams certFile keyFile caFile = do
   warnIfNearExpiry "server" certFile
 #ifndef mingw32_HOST_OS
   mode <- fileMode <$> getFileStatus keyFile
-  if mode .&. 0o077 /= 0
-    then ioError (userError ("mkServerParams: key file " ++ keyFile ++ " must not be accessible by group/other (chmod 0600)"))
+  if mode .&. 0o7777 /= 0o600
+    then ioError (userError ("mkServerParams: key file " ++ keyFile ++ " must have exact mode 0600"))
     else pure ()
 #endif
   credResult <- credentialLoadX509 certFile keyFile
@@ -236,8 +237,8 @@ mkClientParams host certFile keyFile caFile = do
   warnIfNearExpiry "client" certFile
 #ifndef mingw32_HOST_OS
   mode <- fileMode <$> getFileStatus keyFile
-  if mode .&. 0o077 /= 0
-    then ioError (userError ("mkClientParams: key file " ++ keyFile ++ " must not be accessible by group/other (chmod 0600)"))
+  if mode .&. 0o7777 /= 0o600
+    then ioError (userError ("mkClientParams: key file " ++ keyFile ++ " must have exact mode 0600"))
     else pure ()
 #endif
   credResult <- credentialLoadX509 certFile keyFile
@@ -254,8 +255,45 @@ mkClientParams host certFile keyFile caFile = do
         }
     , clientHooks = (clientHooks (defaultParamsClient host B8.empty))
         { onCertificateRequest = \_ -> pure (Just cred)
+        , onServerCertificate = sanOnlyServerCertificate
         }
     }
+
+-- The dependency falls back to CN when no DNS SAN exists, even for IP-only
+-- SANs. Keep its DNS matcher, but require DNS SAN presence; match IP literals
+-- with the same Data.IP parsers/conversions against only raw IP SAN values.
+sanOnlyName :: HostName -> Certificate -> [FailedReason]
+sanOnlyName host cert =
+  case (readMaybe host :: Maybe IPv4, readMaybe host :: Maybe IPv6) of
+    (Just ip, _) -> acceptIf (any (matchesIPv4 ip) names)
+    (_, Just ip) -> acceptIf (any (matchesIPv6 ip) names)
+    _ | any isDNS names -> hookValidateName defaultHooks host cert
+      | otherwise -> mismatch
+  where
+    names = sanEntries cert
+    mismatch = [NameMismatch host]
+    acceptIf matches = if matches then [] else mismatch
+    isDNS (AltNameDNS _) = True
+    isDNS _ = False
+    matchesIPv4 ip (AltNameIP raw) =
+      BS.length raw == 4 && toIPv4 (map fromIntegral (BS.unpack raw)) == ip
+    matchesIPv4 _ _ = False
+    matchesIPv6 ip (AltNameIP raw) =
+      BS.length raw == 16 && toIPv6 (ipWords (BS.unpack raw)) == ip
+    matchesIPv6 _ _ = False
+    ipWords :: [Word8] -> [Int]
+    ipWords (a : b : rest) = (fromIntegral a * 256 + fromIntegral b) : ipWords rest
+    ipWords _ = []
+
+-- A cache hit bypasses validation hooks in crypton-x509-validation. Enforce
+-- SAN identity before consulting it, then retain all default chain/time/CA
+-- checks and the original signed chain/store/cache/service identification.
+sanOnlyServerCertificate :: CertificateStore -> ValidationCache -> ServiceID -> CertificateChain -> IO [FailedReason]
+sanOnlyServerCertificate store cache ident@(host, _) chain = case chain of
+  CertificateChain [] -> pure [EmptyChain]
+  CertificateChain (leaf : _) -> case sanOnlyName host (getCertificate leaf) of
+    [] -> validate HashSHA256 (defaultHooks { hookValidateName = sanOnlyName }) defaultChecks store cache ident chain
+    failures -> pure failures
 
 -- | Connect to a mirror server over mutually-authenticated TLS 1.3 and
 -- return a ready transport (handshake completed).
@@ -355,7 +393,9 @@ connectTlsPinned params host port expectedFp = do
   mFp <- peerCertFingerprintSHA256 t
   if mFp == Just expectedFp
     then pure t
-    else ioError (userError ("connectTlsPinned: certificate fingerprint mismatch for " ++ host ++ ":" ++ show port))
+    else do
+      tlsClose t
+      ioError (userError ("connectTlsPinned: certificate fingerprint mismatch for " ++ host ++ ":" ++ show port))
 
 -- | Build the TLS backend for an already-connected 'Socket'.
 --

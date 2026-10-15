@@ -19,10 +19,23 @@ import qualified TcpTransportSpec
 import qualified TlsTransportSpec
 import qualified RegistrySpec
 import qualified ResourceSpec
-import Test.Tasty (defaultMain, testGroup)
+import qualified ClientReplySpec
+import qualified ServerFramingSpec
+import qualified StdioTransportSpec
+import qualified TlsPolicySpec
+import qualified TransportFramingSpec
+import System.Environment (getArgs)
+import Test.Tasty (TestTree, defaultMain, testGroup)
 
 main :: IO ()
-main = defaultMain $ testGroup "ModelMirrors"
+main = do
+  args <- getArgs
+  case args of
+    ["--framing-stdio-child", mode] -> StdioTransportSpec.child mode
+    _ -> defaultMain tests
+
+tests :: TestTree
+tests = testGroup "ModelMirrors"
   [ ClientSpec.spec
   , DiffHintSpec.spec
   , EngineSpec.spec
@@ -42,4 +55,9 @@ main = defaultMain $ testGroup "ModelMirrors"
   , TlsTransportSpec.spec
   , RegistrySpec.spec
   , ResourceSpec.spec
+  , ClientReplySpec.spec
+  , ServerFramingSpec.spec
+  , StdioTransportSpec.spec
+  , TlsPolicySpec.spec
+  , TransportFramingSpec.spec
   ]

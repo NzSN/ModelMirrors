@@ -30,6 +30,7 @@ import qualified Data.Text as T
 import Protocol.Core
   ( ClientMessage (..)
   , JobId
+  , JobKind (..)
   , JobOutcome (..)
   , JobPhase (..)
   , MirrorMessage (..)
@@ -115,7 +116,8 @@ submitValidateAsync transport cfg bound mSpec = do
   sendMsg transport (RegisterValidateAsync cfg bound mSpec)
   recvMsg transport >>= \case
     Left err                    -> pure (Left (T.pack err))
-    Right (JobAccepted jobId _) -> pure (Right jobId)
+    Right (JobAccepted jobId ValidateJob) -> pure (Right jobId)
+    Right (JobAccepted _ _) -> pure (Left (T.pack "Unexpected job kind: expected validate"))
     Right (RegisterError e)     -> pure (Left e)
     Right (ProtocolError e)     -> pure (Left e)
     Right _ -> pure (Left (T.pack "Unexpected message: expected JobAccepted"))
@@ -127,7 +129,8 @@ submitGenTracesAsync transport cfg tc destPath mSpec = do
   sendMsg transport (RegisterGenTracesAsync cfg tc destPath mSpec)
   recvMsg transport >>= \case
     Left err                    -> pure (Left (T.pack err))
-    Right (JobAccepted jobId _) -> pure (Right jobId)
+    Right (JobAccepted jobId GenTracesJob) -> pure (Right jobId)
+    Right (JobAccepted _ _) -> pure (Left (T.pack "Unexpected job kind: expected gen_traces"))
     Right (RegisterError e)     -> pure (Left e)
     Right (ProtocolError e)     -> pure (Left e)
     Right _ -> pure (Left (T.pack "Unexpected message: expected JobAccepted"))
@@ -139,8 +142,12 @@ pollJob transport jobId = do
   sendMsg transport (QueryJob jobId)
   recvMsg transport >>= \case
     Left err                    -> pure (Left (T.pack err))
-    Right (JobStatus _ phase)   -> pure (Right (phase, Nothing))
-    Right (JobResult _ outcome) -> pure (Right (terminalPhaseOf outcome, Just outcome))
+    Right (JobStatus echoed phase)
+      | echoed == jobId -> pure (Right (phase, Nothing))
+      | otherwise -> pure wrongJobId
+    Right (JobResult echoed outcome)
+      | echoed == jobId -> pure (Right (terminalPhaseOf outcome, Just outcome))
+      | otherwise -> pure wrongJobId
     Right (RegisterError e)     -> pure (Left e)
     Right (ProtocolError e)     -> pure (Left e)
     Right _ -> pure (Left (T.pack "Unexpected message: expected JobStatus or JobResult"))
@@ -154,8 +161,11 @@ awaitJob transport jobId mTimeout = do
   sendMsg transport (AwaitJob jobId mTimeout)
   recvMsg transport >>= \case
     Left err                    -> pure (Left (T.pack err))
-    Right (JobResult _ outcome) -> pure (Right outcome)
-    Right (JobStatus _ phase)
+    Right (JobResult echoed outcome)
+      | echoed == jobId -> pure (Right outcome)
+      | otherwise -> pure wrongJobId
+    Right (JobStatus echoed phase)
+      | echoed /= jobId           -> pure wrongJobId
       | isTerminalPhase phase    -> pollUntilResult
       | otherwise                -> awaitJob transport jobId mTimeout
     Right (RegisterError e)     -> pure (Left e)
@@ -174,16 +184,24 @@ awaitJob transport jobId mTimeout = do
           | otherwise           -> Left (T.pack "job terminal without delivered result")
 
 -- | Request cancellation of a job. Succeeds once the mirror acknowledges
--- with a @job_status@ reply.
+-- with a matching @job_status@ or terminal @job_result@ reply.
 cancelJob :: Transport t => t -> JobId -> IO (Either Text ())
 cancelJob transport jobId = do
   sendMsg transport (CancelJob jobId)
   recvMsg transport >>= \case
     Left err                  -> pure (Left (T.pack err))
-    Right (JobStatus _ _)     -> pure (Right ())
+    Right (JobStatus echoed _)
+      | echoed == jobId -> pure (Right ())
+      | otherwise -> pure wrongJobId
+    Right (JobResult echoed _)
+      | echoed == jobId -> pure (Right ())
+      | otherwise -> pure wrongJobId
     Right (RegisterError e)   -> pure (Left e)
     Right (ProtocolError e)   -> pure (Left e)
-    Right _ -> pure (Left (T.pack "Unexpected message: expected JobStatus"))
+    Right _ -> pure (Left (T.pack "Unexpected message: expected JobStatus or JobResult"))
+
+wrongJobId :: Either Text a
+wrongJobId = Left (T.pack "Unexpected job ID in reply")
 
 isTerminalPhase :: JobPhase -> Bool
 isTerminalPhase phase = phase `elem` [JobDone, JobFailed, JobCancelled, JobUnknown]

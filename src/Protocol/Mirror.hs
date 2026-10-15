@@ -451,7 +451,7 @@ instance Transport t => Step (MkJobCancel t) where
 -- resources force-released ('closeJobStore'), and the accumulated step log
 -- is returned.
 runAsyncSession :: Transport t => t -> JobStore -> IO [MirrorStep]
-runAsyncSession transport store = loop []
+runAsyncSession transport store = loop [] `finally` closeJobStore store
   where
     loop acc = do
       msg <- recvMsg transport
@@ -505,7 +505,6 @@ runAsyncSession transport store = loop []
       case mErr of
         Just err -> sendMsg transport (ProtocolError (T.pack err))
         Nothing -> pure ()
-      closeJobStore store
       pure (reverse acc)
 
 
